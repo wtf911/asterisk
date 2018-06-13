@@ -1095,11 +1095,12 @@
 						This option specifies which of the password style config options should be read
 						when trying to authenticate an endpoint inbound request. If set to <literal>userpass</literal>
 						then we'll read from the 'password' option. For <literal>md5</literal> we'll read
-						from 'md5_cred'.
+						from 'md5_cred'. If set to <literal>oauth</literal> then we'll read from the refresh_toke/oauth_client_id/oauth_secret fields.
 						</para>
 						<enumlist>
 							<enum name="md5"/>
 							<enum name="userpass"/>
+							<enum name="oauth"/>
 						</enumlist>
 					</description>
 				</configOption>

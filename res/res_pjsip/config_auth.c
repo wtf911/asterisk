@@ -56,6 +56,8 @@ static int auth_type_handler(const struct aco_option *opt, struct ast_variable *
 		auth->type = AST_SIP_AUTH_TYPE_USER_PASS;
 	} else if (!strcasecmp(var->value, "md5")) {
 		auth->type = AST_SIP_AUTH_TYPE_MD5;
+        } else if (!strcasecmp(var->value, "oauth")) {
+                auth->type = AST_SIP_AUTH_TYPE_OAUTH;
 	} else {
 		ast_log(LOG_WARNING, "Unknown authentication storage type '%s' specified for %s\n",
 				var->value, var->name);
@@ -66,7 +68,8 @@ static int auth_type_handler(const struct aco_option *opt, struct ast_variable *
 
 static const char *auth_types_map[] = {
 	[AST_SIP_AUTH_TYPE_USER_PASS] = "userpass",
-	[AST_SIP_AUTH_TYPE_MD5] = "md5"
+	[AST_SIP_AUTH_TYPE_MD5] = "md5",
+        [AST_SIP_AUTH_TYPE_OAUTH] = "oauth"
 };
 
 const char *ast_sip_auth_type_to_str(enum ast_sip_auth_type type)
@@ -106,6 +109,13 @@ static int auth_apply(const struct ast_sorcery *sorcery, void *obj)
 			res = -1;
 		}
 		break;
+	case AST_SIP_AUTH_TYPE_OAUTH:
+                if (ast_strlen_zero(auth->refresh_token) || ast_strlen_zero(auth->oauth_clientid) || ast_strlen_zero(auth->oauth_secret)) {
+                        ast_log(LOG_ERROR, "'oauth' authentication specified but refresh_token, oauth_clientid, or oauth_secret not "
+                                        "specified for auth '%s'\n", ast_sorcery_object_get_id(auth));
+                        res = -1;
+                }
+                break;
 	case AST_SIP_AUTH_TYPE_USER_PASS:
 	case AST_SIP_AUTH_TYPE_ARTIFICIAL:
 		break;
@@ -365,6 +375,12 @@ int ast_sip_initialize_sorcery_auth(void)
 			"", OPT_STRINGFIELD_T, 0, STRFLDSET(struct ast_sip_auth, auth_user));
 	ast_sorcery_object_field_register(sorcery, SIP_SORCERY_AUTH_TYPE, "password",
 			"", OPT_STRINGFIELD_T, 0, STRFLDSET(struct ast_sip_auth, auth_pass));
+        ast_sorcery_object_field_register(sorcery, SIP_SORCERY_AUTH_TYPE, "refresh_token",
+                        "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct ast_sip_auth, refresh_token));
+        ast_sorcery_object_field_register(sorcery, SIP_SORCERY_AUTH_TYPE, "oauth_clientid",
+                        "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct ast_sip_auth, oauth_clientid));
+        ast_sorcery_object_field_register(sorcery, SIP_SORCERY_AUTH_TYPE, "oauth_secret",
+                        "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct ast_sip_auth, oauth_secret));
 	ast_sorcery_object_field_register(sorcery, SIP_SORCERY_AUTH_TYPE, "md5_cred",
 			"", OPT_STRINGFIELD_T, 0, STRFLDSET(struct ast_sip_auth, md5_creds));
 	ast_sorcery_object_field_register(sorcery, SIP_SORCERY_AUTH_TYPE, "realm",

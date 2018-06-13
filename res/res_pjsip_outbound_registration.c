@@ -27,6 +27,7 @@
 
 #include <pjsip.h>
 #include <pjsip_ua.h>
+#include <pjsip/sip_dialog.h>
 
 #include "asterisk/res_pjsip.h"
 #include "asterisk/res_pjsip_cli.h"
@@ -37,7 +38,10 @@
 #include "asterisk/threadstorage.h"
 #include "asterisk/threadpool.h"
 #include "asterisk/statsd.h"
+#include "asterisk/pbx.h"
 #include "res_pjsip/include/res_pjsip_private.h"
+#include "asterisk/res_pjsip_session.h"
+#include "asterisk/vector.h"
 
 /*** DOCUMENTATION
 	<configInfo name="res_pjsip_outbound_registration" language="en_US">
@@ -318,6 +322,8 @@ struct sip_outbound_registration {
 	unsigned int support_path;
 };
 
+AST_VECTOR(service_route_vector_type, pj_str_t);
+
 /*! \brief Outbound registration client state information (persists for lifetime of regc) */
 struct sip_outbound_registration_client_state {
 	/*! \brief Current state of this registration */
@@ -353,6 +359,10 @@ struct sip_outbound_registration_client_state {
 	struct ast_taskprocessor *serializer;
 	/*! \brief Configured authentication credentials */
 	struct ast_sip_auth_vector outbound_auths;
+        /*! \brief List of service-routes in register response */
+	struct service_route_vector_type service_route_vector;
+        /*! \brief P-Associated-URI from register response */
+        pj_str_t associated_uri;
 	/*! \brief Registration should be destroyed after completion of transaction */
 	unsigned int destroy:1;
 	/*! \brief Non-zero if we have attempted sending a REGISTER with authentication */
@@ -520,6 +530,7 @@ static void cancel_registration(struct sip_outbound_registration_client_state *c
 }
 
 static pj_str_t PATH_NAME = { "path", 4 };
+static pj_str_t GOOGLE_REQUIRED_CRAP = { "replaces,path,outbound", 22 };
 
 /*! \brief Helper function which sends a message and cleans up, if needed, on failure */
 static pj_status_t registration_client_send(struct sip_outbound_registration_client_state *client_state,
@@ -596,6 +607,27 @@ static int handle_client_registration(void *data)
 		/* add on to the existing Supported header */
 		pj_strassign(&hdr->values[hdr->count++], &PATH_NAME);
 	}
+
+        //TODO: if (doing GVSIP, add extra supported crap)
+        {
+                pjsip_supported_hdr *hdr;
+
+                hdr = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_SUPPORTED, NULL);
+                if (!hdr) {
+                        /* insert a new Supported header */
+                        hdr = pjsip_supported_hdr_create(tdata->pool);
+                        if (!hdr) {
+                                pjsip_tx_data_dec_ref(tdata);
+                                return -1;
+                        }
+
+                        pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
+                }
+
+                /* add on to the existing Supported header */
+                pj_strassign(&hdr->values[hdr->count++], &GOOGLE_REQUIRED_CRAP);
+
+        }
 
 	registration_client_send(client_state, tdata);
 
@@ -964,6 +996,42 @@ static int handle_registration_response(void *data)
 				registration_transport_shutdown_cb, response->client_state->registration_name,
 				monitor_matcher);
 		}
+
+		//naf
+		{	
+		        pjsip_hdr *h;
+		        pjsip_msg *msg;
+
+			static const pj_str_t service_route_str = { "Service-Route", 13 };
+
+		        AST_VECTOR_INIT(&response->client_state->service_route_vector, 0);
+		        msg = response->rdata->msg_info.msg;
+			h = NULL;
+		        while(h = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &service_route_str, h == NULL ? NULL : h->next))
+			{
+                                pj_str_t value = ((pjsip_generic_string_hdr*)h)->hvalue;
+                                //pj_str_t copy;
+				//pj_strdup_with_null(response->rdata->tp_info.pool, &copy, &value);
+		        	AST_VECTOR_APPEND(&response->client_state->service_route_vector, value);
+				ast_log(LOG_ERROR, "naf: found service-route: %s\n", value.ptr);
+		        }
+
+			static const pj_str_t associated_uri_str = { "P-Associated-URI", 16 };
+                        pjsip_hdr* associated_uri_hdr;
+                        if (associated_uri_hdr = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &associated_uri_str, NULL))
+                        {
+                                pj_str_t value = ((pjsip_generic_string_hdr*)associated_uri_hdr)->hvalue;
+				ast_log(LOG_ERROR, "naf: found associated uri length %i: %s\n", value.slen, value.ptr);
+                                pj_strdup_with_null(response->rdata->tp_info.pool, &response->client_state->associated_uri, &value);
+				//response->client_state->associated_uri = value;
+ast_log(LOG_ERROR, "naf: stored associated uri length %i: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
+
+                        }
+
+
+		}
+
+
 	} else if (response->client_state->destroy) {
 		/* We need to deal with the pending destruction instead. */
 	} else if (response->retry_after) {
@@ -1283,6 +1351,88 @@ static int can_reuse_registration(struct sip_outbound_registration *existing,
 	return rc;
 }
 
+static int fetch_access_token(struct ast_sip_auth *auth)
+{
+        RAII_VAR(char *, cmd, NULL, ast_free);
+        char cBuf[1024] = "";
+        const char *url = "https://www.googleapis.com/oauth2/v3/token";
+        struct ast_json_error error;
+        RAII_VAR(struct ast_json *, jobj, NULL, ast_json_unref);
+
+        ast_asprintf(&cmd, "CURL(%s,client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token)",
+                     url, auth->oauth_clientid, auth->oauth_secret, auth->refresh_token);
+
+        ast_debug(2, "Performing OAuth 2.0 authentication for using command: %s\n", cmd);
+
+        if (ast_func_read(NULL, cmd, cBuf, sizeof(cBuf) - 1)) {
+                ast_log(LOG_ERROR, "CURL is unavailable. This is required for OAuth 2.0 authentication. Please ensure it is loaded.\n");
+                return -1;
+        }
+
+        ast_debug(2, "OAuth 2.0 authentication returned: %s\n", cBuf);
+
+        jobj = ast_json_load_string(cBuf, &error);
+        if (jobj) {
+                const char *token = ast_json_string_get(ast_json_object_get(jobj, "access_token"));
+                if (token) {
+			ast_debug(2, "got %s", token);
+                        ast_string_field_set(auth, auth_pass, token);
+                        return 0;
+                }
+        }
+
+        ast_log(LOG_ERROR, "An error occurred while performing OAuth 2.0 authentication: %s\n", cBuf);
+
+        return -1;
+}
+
+
+static int set_outbound_authentication_credentials(pjsip_regc *regc,
+                const struct ast_sip_auth_vector *auth_vector)
+{
+        size_t auth_size = AST_VECTOR_SIZE(auth_vector);
+        struct ast_sip_auth **auths = ast_alloca(auth_size * sizeof(*auths));
+        pjsip_cred_info *auth_creds = ast_alloca(1 * sizeof(*auth_creds));
+        int res = 0;
+        int i;
+
+        if (ast_sip_retrieve_auths(auth_vector, auths)) {
+                res = -1;
+                goto cleanup;
+        }
+
+        for (i = 0; i < auth_size; ++i) {
+                pj_cstr(&auth_creds[0].username, auths[i]->auth_user);
+                pj_cstr(&auth_creds[0].scheme, "Bearer");
+                pj_cstr(&auth_creds[0].realm, auths[i]->realm);
+                switch (auths[i]->type) {
+                case AST_SIP_AUTH_TYPE_OAUTH:
+			ast_debug(2, "Obtaining OAuth access token");
+			if (fetch_access_token(auths[i])) {
+				ast_log(LOG_WARNING, "Obtaining OAuth access token failed");
+				res = -1;
+			}
+			ast_debug(2, "Setting data to %s", auths[i]->auth_pass);
+
+                        pj_cstr(&auth_creds[0].data, auths[i]->auth_pass);
+                        auth_creds[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+                        break;
+                }
+        }
+
+        pjsip_regc_set_credentials(regc, 1, auth_creds);
+
+        pjsip_auth_clt_pref prefs;
+        prefs.initial_auth = PJ_TRUE;
+        pj_cstr(&prefs.algorithm, "oauth");
+        pjsip_regc_set_prefs(regc, &prefs);
+
+cleanup:
+        ast_sip_cleanup_auths(auths, auth_size);
+        return res;
+}
+
+
 /*! \brief Helper function that allocates a pjsip registration client and configures it */
 static int sip_outbound_registration_regc_alloc(void *data)
 {
@@ -1340,6 +1490,16 @@ static int sip_outbound_registration_regc_alloc(void *data)
 			&state->client_state->client) != PJ_SUCCESS) {
 		return -1;
 	}
+
+
+
+        //naf - for initial auth
+        if (set_outbound_authentication_credentials(state->client_state->client, &registration->outbound_auths)) {
+                ast_log(LOG_WARNING, "Failed to set authentication credentials\n");
+                return -1;
+        }
+
+
 
 	ast_sip_set_tpselector_from_transport_name(registration->transport, &selector);
 	pjsip_regc_set_transport(state->client_state->client, &selector);
@@ -2137,6 +2297,93 @@ static void network_change_stasis_cb(void *data, struct stasis_subscription *sub
 	reregister_all();
 }
 
+//naf...
+/*! \brief Callback function for matching an outbound registration based on line */
+static int find_registration(void *obj, void *arg, int flags)
+{
+        struct sip_outbound_registration_state *state = obj;
+        pjsip_param *line = arg;
+
+        //TODO: find something to match, not just take the first one
+        return CMP_MATCH;
+}
+
+
+static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_data *tdata)
+{
+    //TODO: only if doing google voice...
+    ast_log(LOG_ERROR, "naf: outgoing request\n");
+
+    static const pj_str_t route_str = { "Route", 5 };
+
+    RAII_VAR(struct ao2_container *, states, NULL, ao2_cleanup);
+    states = ao2_global_obj_ref(current_states);
+    if (!states) {
+        ast_log(LOG_ERROR, "naf: no global\n");
+    }
+
+    RAII_VAR(struct sip_outbound_registration_state *, state, NULL, ao2_cleanup);
+    state = ao2_callback(states, 0, find_registration, NULL);
+    if (!state) {
+        ast_log(LOG_ERROR, "naf: no state\n");
+    }
+
+    ast_log(LOG_ERROR, "naf: got state!\n");
+
+    struct service_route_vector_type v = state->client_state->service_route_vector;
+
+    int size = AST_VECTOR_SIZE(&v);
+
+    // Note: cannot remove old Route header or message wont send correctly?
+    //if (size > 0)
+    //{
+    //    pjsip_msg_find_remove_hdr(tdata->msg, PJSIP_H_ROUTE, NULL);
+    //}
+
+    for (int i = 0; i < size; ++i)
+    {
+        pj_str_t s = AST_VECTOR_GET(&v, i);
+        ast_log(LOG_ERROR, "naf: recovered %s\n", s.ptr);
+
+        pjsip_generic_string_hdr* route_hdr;
+        route_hdr = pjsip_generic_string_hdr_create(tdata->pool, &route_str, &s);
+ 
+        pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr*)route_hdr);
+    }
+
+
+    //also add outbound to supported header
+    pjsip_supported_hdr *hdr;
+
+    hdr = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_SUPPORTED, NULL);
+    if (!hdr) {
+        /* insert a new Supported header */
+        hdr = pjsip_supported_hdr_create(tdata->pool);
+        if (!hdr) {
+            ast_log(LOG_ERROR, "cant create header. wtf?\n");
+        }
+ 
+        pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
+    }
+
+    /* add on to the existing Supported header */
+    pj_str_t OUTBOUND_NAME = { "outbound", 8 };
+    pj_strassign(&hdr->values[hdr->count++], &OUTBOUND_NAME);
+    pj_strassign(&hdr->values[hdr->count++], &PATH_NAME);
+
+    //add ppi header
+    static const pj_str_t pj_pai_name = { "P-Preferred-Identity", 20 };
+    pjsip_generic_string_hdr *pai_hdr;
+    pai_hdr = pjsip_generic_string_hdr_create(tdata->pool, &pj_pai_name, &state->client_state->associated_uri);
+    pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)pai_hdr);
+}
+
+static struct ast_sip_session_supplement gvsip_supplement = {
+    .method = "INVITE",
+    .outgoing_request = handle_outgoing_request,
+    .priority = AST_SIP_SUPPLEMENT_PRIORITY_LAST,
+};
+
 static int unload_module(void)
 {
 	int remaining;
@@ -2187,6 +2434,8 @@ static int unload_module(void)
 static int load_module(void)
 {
 	struct ao2_container *new_states;
+
+	CHECK_PJSIP_MODULE_LOADED();
 
 	shutdown_group = ast_serializer_shutdown_group_alloc();
 	if (!shutdown_group) {
@@ -2249,6 +2498,9 @@ static int load_module(void)
 	/* Register how this module identifies endpoints. */
 	ast_sip_register_endpoint_identifier(&line_identifier);
 
+	if (ast_sip_session_register_supplement(&gvsip_supplement))
+		ast_log(LOG_ERROR, "Unable to register suppliement.\n");
+
 	/* Register CLI commands. */
 	cli_formatter = ao2_alloc(sizeof(struct ast_sip_cli_formatter_entry), NULL);
 	if (!cli_formatter) {
@@ -2298,6 +2550,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "PJSIP Outbound Regist
 	.reload = reload_module,
 	.unload = unload_module,
 	.load_pri = AST_MODPRI_APP_DEPEND,
-	.requires = "res_pjsip",
-	.optional_modules = "res_statsd",
 );

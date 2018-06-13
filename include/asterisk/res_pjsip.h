@@ -401,6 +401,8 @@ enum ast_sip_auth_type {
 	AST_SIP_AUTH_TYPE_USER_PASS,
 	/*! Credentials stored as an MD5 sum */
 	AST_SIP_AUTH_TYPE_MD5,
+        /*! Oauth */
+        AST_SIP_AUTH_TYPE_OAUTH,
 	/*! Credentials not stored this is a fake auth */
 	AST_SIP_AUTH_TYPE_ARTIFICIAL
 };
@@ -419,6 +421,12 @@ struct ast_sip_auth {
 		AST_STRING_FIELD(auth_pass);
 		/*! Authentication credentials in MD5 format (hash of user:realm:pass) */
 		AST_STRING_FIELD(md5_creds);
+		/*! Refresh token to use for OAuth authentication */
+		AST_STRING_FIELD(refresh_token);
+		/*! Client ID to use for OAuth authentication */
+		AST_STRING_FIELD(oauth_clientid);
+		/*! Secret to use for OAuth authentication */
+		AST_STRING_FIELD(oauth_secret);
 	);
 	/*! The time period (in seconds) that a nonce may be reused */
 	unsigned int nonce_lifetime;

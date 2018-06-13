@@ -110,6 +110,9 @@ static int system_apply(const struct ast_sorcery *system_sorcery, void *obj)
 	pjsip_cfg()->endpt.disable_tcp_switch =
 		system->disable_tcp_switch ? PJ_TRUE : PJ_FALSE;
 
+	//TODO: remove this hack?
+	pjsip_cfg()->endpt.disable_secure_dlg_check = PJ_TRUE;
+
 	return 0;
 }
 
