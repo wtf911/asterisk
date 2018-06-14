@@ -5,7 +5,7 @@ Currently not working. REGISTER succeeds, but
 - outgoing calls don't receive a response to the INVITE request
 
 ##Config example
-
+```
 [transport-tls]
 type=transport
 protocol=tls
@@ -48,4 +48,4 @@ ice_support=yes
 type=identify
 endpoint=gvsip
 match=obihai.telephony.goog
-
+```
