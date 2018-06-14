@@ -2435,8 +2435,6 @@ static int load_module(void)
 {
 	struct ao2_container *new_states;
 
-	CHECK_PJSIP_MODULE_LOADED();
-
 	shutdown_group = ast_serializer_shutdown_group_alloc();
 	if (!shutdown_group) {
 		return AST_MODULE_LOAD_DECLINE;
@@ -2498,8 +2496,7 @@ static int load_module(void)
 	/* Register how this module identifies endpoints. */
 	ast_sip_register_endpoint_identifier(&line_identifier);
 
-	if (ast_sip_session_register_supplement(&gvsip_supplement))
-		ast_log(LOG_ERROR, "Unable to register suppliement.\n");
+	ast_sip_session_register_supplement(&gvsip_supplement);
 
 	/* Register CLI commands. */
 	cli_formatter = ao2_alloc(sizeof(struct ast_sip_cli_formatter_entry), NULL);
@@ -2550,4 +2547,6 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "PJSIP Outbound Regist
 	.reload = reload_module,
 	.unload = unload_module,
 	.load_pri = AST_MODPRI_APP_DEPEND,
+	.requires = "res_pjsip",
+	.optional_modules = "res_statsd",
 );

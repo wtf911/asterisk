@@ -1115,6 +1115,15 @@
 					<synopsis>Plain text password used for authentication.</synopsis>
 					<description><para>Only used when auth_type is <literal>userpass</literal>.</para></description>
 				</configOption>
+				<configOption name="refresh_token">
+					<synopsis>Google OAuth 2.0 refresh token</synopsis>
+				</configOption>
+				<configOption name="oauth_clientid">
+					<synopsis>Google OAuth 2.0 application's client id</synopsis>
+				</configOption>
+				<configOption name="oauth_secret">
+					<synopsis>Google OAuth 2.0 application's secret</synopsis>
+				</configOption>
 				<configOption name="realm">
 					<synopsis>SIP realm for endpoint</synopsis>
 					<description><para>
