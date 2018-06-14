@@ -42,6 +42,7 @@
 #include "res_pjsip/include/res_pjsip_private.h"
 #include "asterisk/res_pjsip_session.h"
 #include "asterisk/vector.h"
+#include "asterisk/res_pjproject.h"
 
 /*** DOCUMENTATION
 	<configInfo name="res_pjsip_outbound_registration" language="en_US">
@@ -323,6 +324,8 @@ struct sip_outbound_registration {
 };
 
 AST_VECTOR(service_route_vector_type, pj_str_t);
+static pj_caching_pool cachingpool;
+static pj_pool_t *reg_pool;
 
 /*! \brief Outbound registration client state information (persists for lifetime of regc) */
 struct sip_outbound_registration_client_state {
@@ -997,7 +1000,7 @@ static int handle_registration_response(void *data)
 				monitor_matcher);
 		}
 
-		//naf
+		// TODO: if config'd to save regisration response fields?
 		{	
 		        pjsip_hdr *h;
 		        pjsip_msg *msg;
@@ -1010,10 +1013,10 @@ static int handle_registration_response(void *data)
 		        while(h = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &service_route_str, h == NULL ? NULL : h->next))
 			{
                                 pj_str_t value = ((pjsip_generic_string_hdr*)h)->hvalue;
-                                //pj_str_t copy;
-				//pj_strdup_with_null(response->rdata->tp_info.pool, &copy, &value);
-		        	AST_VECTOR_APPEND(&response->client_state->service_route_vector, value);
-				ast_log(LOG_ERROR, "naf: found service-route: %s\n", value.ptr);
+				pj_str_t copy;
+				pj_strdup_with_null(reg_pool, &copy, &value);
+				AST_VECTOR_APPEND(&response->client_state->service_route_vector, copy);
+				ast_log(LOG_DEBUG, "Stored service-route: %s\n", copy.ptr);
 		        }
 
 			static const pj_str_t associated_uri_str = { "P-Associated-URI", 16 };
@@ -1021,11 +1024,8 @@ static int handle_registration_response(void *data)
                         if (associated_uri_hdr = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &associated_uri_str, NULL))
                         {
                                 pj_str_t value = ((pjsip_generic_string_hdr*)associated_uri_hdr)->hvalue;
-				ast_log(LOG_ERROR, "naf: found associated uri length %i: %s\n", value.slen, value.ptr);
-                                pj_strdup_with_null(response->rdata->tp_info.pool, &response->client_state->associated_uri, &value);
-				//response->client_state->associated_uri = value;
-ast_log(LOG_ERROR, "naf: stored associated uri length %i: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
-
+				pj_strdup_with_null(reg_pool, &response->client_state->associated_uri, &value);
+				ast_log(LOG_DEBUG, "Stored associated uri length %ld: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
                         }
 
 
@@ -1416,16 +1416,18 @@ static int set_outbound_authentication_credentials(pjsip_regc *regc,
 
                         pj_cstr(&auth_creds[0].data, auths[i]->auth_pass);
                         auth_creds[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+
+			pjsip_regc_set_credentials(regc, 1, auth_creds);
+
+			// for oauth, send auth without waiting for unauthorized response
+			pjsip_auth_clt_pref prefs;
+			prefs.initial_auth = PJ_TRUE;
+			pj_cstr(&prefs.algorithm, "oauth");
+			pjsip_regc_set_prefs(regc, &prefs);
+
                         break;
                 }
         }
-
-        pjsip_regc_set_credentials(regc, 1, auth_creds);
-
-        pjsip_auth_clt_pref prefs;
-        prefs.initial_auth = PJ_TRUE;
-        pj_cstr(&prefs.algorithm, "oauth");
-        pjsip_regc_set_prefs(regc, &prefs);
 
 cleanup:
         ast_sip_cleanup_auths(auths, auth_size);
@@ -1491,15 +1493,10 @@ static int sip_outbound_registration_regc_alloc(void *data)
 		return -1;
 	}
 
-
-
-        //naf - for initial auth
         if (set_outbound_authentication_credentials(state->client_state->client, &registration->outbound_auths)) {
                 ast_log(LOG_WARNING, "Failed to set authentication credentials\n");
                 return -1;
         }
-
-
 
 	ast_sip_set_tpselector_from_transport_name(registration->transport, &selector);
 	pjsip_regc_set_transport(state->client_state->client, &selector);
@@ -2297,8 +2294,7 @@ static void network_change_stasis_cb(void *data, struct stasis_subscription *sub
 	reregister_all();
 }
 
-//naf...
-/*! \brief Callback function for matching an outbound registration based on line */
+/*! \brief Callback function for matching an outbound registration based on ??? */
 static int find_registration(void *obj, void *arg, int flags)
 {
         struct sip_outbound_registration_state *state = obj;
@@ -2312,23 +2308,25 @@ static int find_registration(void *obj, void *arg, int flags)
 static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_data *tdata)
 {
     //TODO: only if doing google voice...
-    ast_log(LOG_ERROR, "naf: outgoing request\n");
+    ast_log(LOG_DEBUG, "Outgoing request being mangled\n");
 
     static const pj_str_t route_str = { "Route", 5 };
 
     RAII_VAR(struct ao2_container *, states, NULL, ao2_cleanup);
     states = ao2_global_obj_ref(current_states);
     if (!states) {
-        ast_log(LOG_ERROR, "naf: no global\n");
+        ast_log(LOG_ERROR, "Cannot find outbound registration states\n");
+        return;
     }
 
     RAII_VAR(struct sip_outbound_registration_state *, state, NULL, ao2_cleanup);
     state = ao2_callback(states, 0, find_registration, NULL);
     if (!state) {
-        ast_log(LOG_ERROR, "naf: no state\n");
+        ast_log(LOG_ERROR, "Cannot find matching outbound registration state\n");
+        return;
     }
 
-    ast_log(LOG_ERROR, "naf: got state!\n");
+    ast_log(LOG_DEBUG, "Found matching outbound registration state\n");
 
     struct service_route_vector_type v = state->client_state->service_route_vector;
 
@@ -2343,7 +2341,7 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
     for (int i = 0; i < size; ++i)
     {
         pj_str_t s = AST_VECTOR_GET(&v, i);
-        ast_log(LOG_ERROR, "naf: recovered %s\n", s.ptr);
+        ast_log(LOG_DEBUG, "Found service-route. Adding route header for %s\n", s.ptr);
 
         pjsip_generic_string_hdr* route_hdr;
         route_hdr = pjsip_generic_string_hdr_create(tdata->pool, &route_str, &s);
@@ -2359,9 +2357,6 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
     if (!hdr) {
         /* insert a new Supported header */
         hdr = pjsip_supported_hdr_create(tdata->pool);
-        if (!hdr) {
-            ast_log(LOG_ERROR, "cant create header. wtf?\n");
-        }
  
         pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
     }
@@ -2425,6 +2420,8 @@ static int unload_module(void)
 
 	ast_debug(2, "Successful shutdown.\n");
 
+	ast_pjproject_caching_pool_destroy(&cachingpool);
+
 	ao2_cleanup(shutdown_group);
 	shutdown_group = NULL;
 
@@ -2450,6 +2447,9 @@ static int load_module(void)
 	}
 	ao2_global_obj_replace_unref(current_states, new_states);
 	ao2_ref(new_states, -1);
+
+	ast_pjproject_caching_pool_init(&cachingpool, &pj_pool_factory_default_policy, 0);
+	reg_pool = pj_pool_create(&cachingpool.factory, "registration", 4096, 4096, NULL);
 
 	/*
 	 * Register sorcery object descriptions.
