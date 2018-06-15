@@ -1,12 +1,12 @@
 # Work-In-Progress GVSIP changes to Asterisk
 
 Currently not working. REGISTER succeeds, but
-- incoming calls don't work due to media problems?
-- outgoing calls don't receive a response to the INVITE request
+- incoming calls: WORKING
+- outgoing calls: NOT working (don't receive a response to the INVITE request)
 
 ##Config example
 ```
-[transport-tls]
+[gvsip]
 type=transport
 protocol=tls
 bind=0.0.0.0:5061
@@ -37,12 +37,20 @@ type=endpoint
 context=from-external
 disallow=all
 allow=ulaw
+allow=opus
 outbound_auth=gvsip
 outbound_proxy=sips:obihai.telephony.goog:5061\;lr
 aors=gvsip
 media_encryption=dtls
+dtls_cert_file=/etc/asterisk/keys/asterisk.crt
+dtls_private_key=/etc/asterisk/keys/asterisk.key
+dtls_setup=actpass
 media_encryption_optimistic=yes
+direct_media=no
 ice_support=yes
+rtcp_mux=yes
+use_avpf=yes
+media_use_received_transport=yes
 
 [gvsip]
 type=identify
