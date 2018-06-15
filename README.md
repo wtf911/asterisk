@@ -50,11 +50,9 @@ media_encryption=dtls
 dtls_cert_file=/etc/asterisk/keys/asterisk.crt
 dtls_private_key=/etc/asterisk/keys/asterisk.key
 dtls_setup=actpass
-media_encryption_optimistic=yes
 direct_media=no
 ice_support=yes
 rtcp_mux=yes
-use_avpf=yes
 media_use_received_transport=yes
 
 [gvsip]
