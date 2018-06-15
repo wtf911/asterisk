@@ -8,6 +8,8 @@ Currently only parially working, and still has too many GV-specific hacks that n
 - outgoing calls: NOT working (don't receive a response to the INVITE request)
 
 ## Config example
+
+### pjsip.conf
 ```
 [gvsip]
 type=transport
@@ -59,4 +61,18 @@ media_use_received_transport=yes
 type=identify
 endpoint=gvsip
 match=obihai.telephony.goog
+```
+
+### rtp.conf
+```
+[general]
+stunaddr=stun.l.google.com:19302
+```
+
+### extensions.conf
+```
+[from-internal]
+exten => _NXXNXXXXXX,1,Set(CALLERID(dnid)=1${CALLERID(dnid)})
+exten => _NXXNXXXXXX,n,Goto(1${EXTEN},1)
+exten => _1NXXNXXXXXX,1,Dial(PJSIP/${EXTEN}@gvsip,,r)
 ```
