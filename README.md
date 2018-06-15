@@ -1,10 +1,13 @@
 # Work-In-Progress GVSIP changes to Asterisk
 
-Currently not working. REGISTER succeeds, but
+## Status
+Currently only parially working, and still has too many GV-specific hacks that need to be wrapped in config options:
+
+- registering with oauth token: WORKING
 - incoming calls: WORKING
 - outgoing calls: NOT working (don't receive a response to the INVITE request)
 
-##Config example
+## Config example
 ```
 [gvsip]
 type=transport
