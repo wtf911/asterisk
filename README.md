@@ -1,12 +1,12 @@
 # Work-In-Progress GVSIP changes to Asterisk
 
 ## Status
-Working for both inbound and outbound calls.
-However, there are still has many GV-specific hacks that need to be cleaned up and either wrapped in config options or fixed to support more than a 1-and-only-1 gvsip endpoint environment.
-
 - registering with oauth token: WORKING
 - incoming calls: WORKING
 - outgoing calls: WORKING
+
+## Known Issues
+- fix uply hack that globally sets pjsip disable_secure_dlg_check to get around sip/sips comparisons
 
 ## Config example
 
