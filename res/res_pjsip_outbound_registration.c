@@ -176,6 +176,12 @@
 						header as necessary.
 					</para></description>
 				</configOption>
+                                <configOption name="support_outbound">
+                                        <synopsis>Enables Outbound support for outbound REGISTER requests.</synopsis>
+                                </configOption>
+                                <configOption name="support_replaces">
+                                        <synopsis>Enables Replaces support for outbound REGISTER requests.</synopsis>
+                                </configOption>
 			</configObject>
 		</configFile>
 	</configInfo>
@@ -321,6 +327,10 @@ struct sip_outbound_registration {
 	struct ast_sip_auth_vector outbound_auths;
 	/*! \brief Whether Path support is enabled */
 	unsigned int support_path;
+        /*! \brief Whether Outbound support is enabled */
+        unsigned int support_outbound;
+        /*! \brief Whether Replaces support is enabled */
+        unsigned int support_replaces;	
 };
 
 AST_VECTOR(service_route_vector_type, pj_str_t);
@@ -356,6 +366,10 @@ struct sip_outbound_registration_client_state {
 	unsigned int auth_rejection_permanent;
 	/*! \brief Determines whether SIP Path support should be advertised */
 	unsigned int support_path;
+        /*! \brief Determines whether SIP Outbound support should be advertised */
+        unsigned int support_outbound;
+        /*! \brief Determines whether SIP Replaces support should be advertised */
+        unsigned int support_replaces;
 	/*! CSeq number of last sent auth request. */
 	unsigned int auth_cseq;
 	/*! \brief Serializer for stuff and things */
@@ -533,7 +547,8 @@ static void cancel_registration(struct sip_outbound_registration_client_state *c
 }
 
 static pj_str_t PATH_NAME = { "path", 4 };
-static pj_str_t GOOGLE_REQUIRED_CRAP = { "replaces,path,outbound", 22 };
+static pj_str_t OUTBOUND_NAME = { "outbound", 8 };
+static pj_str_t REPLACES_NAME = { "replaces", 8 };
 
 /*! \brief Helper function which sends a message and cleans up, if needed, on failure */
 static pj_status_t registration_client_send(struct sip_outbound_registration_client_state *client_state,
@@ -571,6 +586,29 @@ static pj_status_t registration_client_send(struct sip_outbound_registration_cli
 	return status;
 }
 
+/*! \brief Helper function to add string to Supported header */
+static int add_to_supported_header(pjsip_tx_data *tdata, pj_str_t *name)
+{
+	pjsip_supported_hdr *hdr;
+
+	hdr = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_SUPPORTED, NULL);
+	if (!hdr) {
+		/* insert a new Supported header */
+		hdr = pjsip_supported_hdr_create(tdata->pool);
+		if (!hdr) {
+			pjsip_tx_data_dec_ref(tdata);
+			return 0;
+		}
+
+		pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
+	}
+
+	/* add on to the existing Supported header */
+	pj_strassign(&hdr->values[hdr->count++], name);
+
+	return 1;
+}
+
 /*! \brief Callback function for registering */
 static int handle_client_registration(void *data)
 {
@@ -592,44 +630,22 @@ static int handle_client_registration(void *data)
 			(int) info.client_uri.slen, info.client_uri.ptr);
 	}
 
-	if (client_state->support_path) {
-		pjsip_supported_hdr *hdr;
+        if (client_state->support_path) {
+                if (!add_to_supported_header(tdata, &PATH_NAME)) {
+                        return -1;
+                }
+        }
 
-		hdr = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_SUPPORTED, NULL);
-		if (!hdr) {
-			/* insert a new Supported header */
-			hdr = pjsip_supported_hdr_create(tdata->pool);
-			if (!hdr) {
-				pjsip_tx_data_dec_ref(tdata);
-				return -1;
-			}
-
-			pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
+        if (client_state->support_outbound) {
+		if (!add_to_supported_header(tdata, &OUTBOUND_NAME)) {
+			return -1;
 		}
-
-		/* add on to the existing Supported header */
-		pj_strassign(&hdr->values[hdr->count++], &PATH_NAME);
 	}
 
-        //TODO: if (doing GVSIP, add extra supported crap)
-        {
-                pjsip_supported_hdr *hdr;
-
-                hdr = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_SUPPORTED, NULL);
-                if (!hdr) {
-                        /* insert a new Supported header */
-                        hdr = pjsip_supported_hdr_create(tdata->pool);
-                        if (!hdr) {
-                                pjsip_tx_data_dec_ref(tdata);
-                                return -1;
-                        }
-
-                        pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
+        if (client_state->support_replaces) {
+                if (!add_to_supported_header(tdata, &REPLACES_NAME)) {
+                        return -1;
                 }
-
-                /* add on to the existing Supported header */
-                pj_strassign(&hdr->values[hdr->count++], &GOOGLE_REQUIRED_CRAP);
-
         }
 
 	registration_client_send(client_state, tdata);
@@ -920,6 +936,34 @@ static void registration_transport_monitor_setup(pjsip_transport *transport, con
 	ao2_ref(monitor, -1);
 }
 
+static void save_response_fields_to_client_state(struct registration_response *response)
+{
+        pjsip_hdr *h;
+        pjsip_msg *msg;
+
+	static const pj_str_t service_route_str = { "Service-Route", 13 };
+
+        AST_VECTOR_INIT(&response->client_state->service_route_vector, 0);
+        msg = response->rdata->msg_info.msg;
+	h = NULL;
+        while((h = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &service_route_str, h == NULL ? NULL : h->next))) {
+		pj_str_t value = ((pjsip_generic_string_hdr*)h)->hvalue;
+		pj_str_t copy;
+		pj_strdup_with_null(reg_pool, &copy, &value);
+		AST_VECTOR_APPEND(&response->client_state->service_route_vector, copy);
+		ast_log(LOG_DEBUG, "Stored service-route: %s\n", copy.ptr);
+        }
+
+	static const pj_str_t associated_uri_str = { "P-Associated-URI", 16 };
+	pjsip_hdr* associated_uri_hdr;
+	if ((associated_uri_hdr = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &associated_uri_str, NULL))) {
+		pj_str_t value = ((pjsip_generic_string_hdr*)associated_uri_hdr)->hvalue;
+		pj_strdup_with_null(reg_pool, &response->client_state->associated_uri, &value);
+		ast_log(LOG_DEBUG, "Stored associated uri length %ld: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
+	}
+}
+
+
 /*! \brief Callback function for handling a response to a registration attempt */
 static int handle_registration_response(void *data)
 {
@@ -1000,37 +1044,7 @@ static int handle_registration_response(void *data)
 				monitor_matcher);
 		}
 
-		// TODO: if config'd to save regisration response fields?
-		{	
-		        pjsip_hdr *h;
-		        pjsip_msg *msg;
-
-			static const pj_str_t service_route_str = { "Service-Route", 13 };
-
-		        AST_VECTOR_INIT(&response->client_state->service_route_vector, 0);
-		        msg = response->rdata->msg_info.msg;
-			h = NULL;
-		        while(h = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &service_route_str, h == NULL ? NULL : h->next))
-			{
-                                pj_str_t value = ((pjsip_generic_string_hdr*)h)->hvalue;
-				pj_str_t copy;
-				pj_strdup_with_null(reg_pool, &copy, &value);
-				AST_VECTOR_APPEND(&response->client_state->service_route_vector, copy);
-				ast_log(LOG_DEBUG, "Stored service-route: %s\n", copy.ptr);
-		        }
-
-			static const pj_str_t associated_uri_str = { "P-Associated-URI", 16 };
-                        pjsip_hdr* associated_uri_hdr;
-                        if (associated_uri_hdr = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &associated_uri_str, NULL))
-                        {
-                                pj_str_t value = ((pjsip_generic_string_hdr*)associated_uri_hdr)->hvalue;
-				pj_strdup_with_null(reg_pool, &response->client_state->associated_uri, &value);
-				ast_log(LOG_DEBUG, "Stored associated uri length %ld: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
-                        }
-
-
-		}
-
+		save_response_fields_to_client_state(response);
 
 	} else if (response->client_state->destroy) {
 		/* We need to deal with the pending destruction instead. */
@@ -1414,8 +1428,8 @@ static int set_outbound_authentication_credentials(pjsip_regc *regc,
 			}
 			ast_debug(2, "Setting data to %s", auths[i]->auth_pass);
 
-                        pj_cstr(&auth_creds[0].data, auths[i]->auth_pass);
-                        auth_creds[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+			pj_cstr(&auth_creds[0].data, auths[i]->auth_pass);
+			auth_creds[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
 
 			pjsip_regc_set_credentials(regc, 1, auth_creds);
 
@@ -1426,6 +1440,8 @@ static int set_outbound_authentication_credentials(pjsip_regc *regc,
 			pjsip_regc_set_prefs(regc, &prefs);
 
                         break;
+		default:
+			break;
                 }
         }
 
@@ -1566,6 +1582,8 @@ static int sip_outbound_registration_perform(void *data)
 	state->client_state->max_retries = registration->max_retries;
 	state->client_state->retries = 0;
 	state->client_state->support_path = registration->support_path;
+	state->client_state->support_outbound = registration->support_outbound;
+	state->client_state->support_replaces = registration->support_replaces;
 	state->client_state->auth_rejection_permanent = registration->auth_rejection_permanent;
 
 	pjsip_regc_update_expires(state->client_state->client, registration->expiration);
@@ -2294,89 +2312,76 @@ static void network_change_stasis_cb(void *data, struct stasis_subscription *sub
 	reregister_all();
 }
 
-/*! \brief Callback function for matching an outbound registration based on ??? */
+/*! \brief Callback function for matching an outbound registration based on name */
 static int find_registration(void *obj, void *arg, int flags)
 {
         struct sip_outbound_registration_state *state = obj;
-        pjsip_param *line = arg;
+        const char* target_name = arg;
 
-        //TODO: find something to match, not just take the first one
-        return CMP_MATCH;
+	const char* registration_name = ast_sorcery_object_get_id(state->registration);
+
+	return !strcmp(target_name, registration_name) ? CMP_MATCH : 0;
 }
 
-
+/*! \brief Mangle outgoing INVITEs by adding headers based on the response to the associated registration request */
 static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_data *tdata)
 {
-    //TODO: only if doing google voice...
-    ast_log(LOG_DEBUG, "Outgoing request being mangled\n");
+	if (!session || !session->endpoint || ast_strlen_zero(session->endpoint->outbound_registration)) {
+		ast_log(LOG_DEBUG, "Outgoing request not associated with a registration. No mangling necessary.\n");
+		return;
+	}
 
-    static const pj_str_t route_str = { "Route", 5 };
+	static const pj_str_t route_str = { "Route", 5 };
 
-    RAII_VAR(struct ao2_container *, states, NULL, ao2_cleanup);
-    states = ao2_global_obj_ref(current_states);
-    if (!states) {
-        ast_log(LOG_ERROR, "Cannot find outbound registration states\n");
-        return;
-    }
+	RAII_VAR(struct ao2_container *, states, NULL, ao2_cleanup);
+	states = ao2_global_obj_ref(current_states);
+	if (!states) {
+		ast_log(LOG_ERROR, "Cannot find outbound registration states\n");
+		return;
+	}
 
-    RAII_VAR(struct sip_outbound_registration_state *, state, NULL, ao2_cleanup);
-    state = ao2_callback(states, 0, find_registration, NULL);
-    if (!state) {
-        ast_log(LOG_ERROR, "Cannot find matching outbound registration state\n");
-        return;
-    }
+	RAII_VAR(struct sip_outbound_registration_state *, state, NULL, ao2_cleanup);
+	state = ao2_callback(states, 0, find_registration, (void*)session->endpoint->outbound_registration);
+	if (!state) {
+		ast_log(LOG_ERROR, "Cannot find matching outbound registration state\n");
+		return;
+	}
 
-    ast_log(LOG_DEBUG, "Found matching outbound registration state\n");
+	ast_log(LOG_DEBUG, "Found matching outbound registration state\n");
 
-    struct service_route_vector_type v = state->client_state->service_route_vector;
+	// add Route for every Service-Route in associated registration response
+	struct service_route_vector_type service_routes = state->client_state->service_route_vector;
 
-    int size = AST_VECTOR_SIZE(&v);
+	int size = AST_VECTOR_SIZE(&service_routes);
 
-    // Note: cannot remove old Route header or message wont send correctly?
-    //if (size > 0)
-    //{
-    //    pjsip_msg_find_remove_hdr(tdata->msg, PJSIP_H_ROUTE, NULL);
-    //}
+	for (int i = 0; i < size; ++i)
+	{
+		pj_str_t service_route_str = AST_VECTOR_GET(&service_routes, i);
+		ast_log(LOG_DEBUG, "Found service-route. Adding route header for %s\n", service_route_str.ptr);
 
-    for (int i = 0; i < size; ++i)
-    {
-        pj_str_t s = AST_VECTOR_GET(&v, i);
-        ast_log(LOG_DEBUG, "Found service-route. Adding route header for %s\n", s.ptr);
-
-        pjsip_generic_string_hdr* route_hdr;
-        route_hdr = pjsip_generic_string_hdr_create(tdata->pool, &route_str, &s);
+		pjsip_generic_string_hdr* route_hdr;
+		route_hdr = pjsip_generic_string_hdr_create(tdata->pool, &route_str, &service_route_str);
  
-        pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr*)route_hdr);
-    }
+		pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr*)route_hdr);
+	}
 
 
-    //also add outbound to supported header
-    pjsip_supported_hdr *hdr;
+	// add ppi header for first Associated-URI in associated registration response
+	static const pj_str_t pj_pai_name = { "P-Preferred-Identity", 20 };
+	pjsip_generic_string_hdr *pai_hdr;
+	pai_hdr = pjsip_generic_string_hdr_create(tdata->pool, &pj_pai_name, &state->client_state->associated_uri);
+	pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)pai_hdr);
 
-    hdr = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_SUPPORTED, NULL);
-    if (!hdr) {
-        /* insert a new Supported header */
-        hdr = pjsip_supported_hdr_create(tdata->pool);
- 
-        pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)hdr);
-    }
-
-    /* add on to the existing Supported header */
-    pj_str_t OUTBOUND_NAME = { "outbound", 8 };
-    pj_strassign(&hdr->values[hdr->count++], &OUTBOUND_NAME);
-    pj_strassign(&hdr->values[hdr->count++], &PATH_NAME);
-
-    //add ppi header
-    static const pj_str_t pj_pai_name = { "P-Preferred-Identity", 20 };
-    pjsip_generic_string_hdr *pai_hdr;
-    pai_hdr = pjsip_generic_string_hdr_create(tdata->pool, &pj_pai_name, &state->client_state->associated_uri);
-    pjsip_msg_add_hdr(tdata->msg, (pjsip_hdr *)pai_hdr);
+	// add outbound & path to supported header
+	add_to_supported_header(tdata, &PATH_NAME);
+	add_to_supported_header(tdata, &OUTBOUND_NAME);
 }
 
+
 static struct ast_sip_session_supplement gvsip_supplement = {
-    .method = "INVITE",
-    .outgoing_request = handle_outgoing_request,
-    .priority = AST_SIP_SUPPLEMENT_PRIORITY_LAST,
+	.method = "INVITE",
+	.outgoing_request = handle_outgoing_request,
+	.priority = AST_SIP_SUPPLEMENT_PRIORITY_LAST,
 };
 
 static int unload_module(void)
@@ -2476,6 +2481,8 @@ static int load_module(void)
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "auth_rejection_permanent", "yes", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, auth_rejection_permanent));
 	ast_sorcery_object_field_register_custom(ast_sip_get_sorcery(), "registration", "outbound_auth", "", outbound_auth_handler, outbound_auths_to_str, outbound_auths_to_var_list, 0, 0);
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_path", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_path));
+	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_outbound", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_outbound));
+	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_replaces", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_replaces));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "line", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, line));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "endpoint", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, endpoint));
 

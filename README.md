@@ -1,11 +1,12 @@
 # Work-In-Progress GVSIP changes to Asterisk
 
 ## Status
-Currently only parially working, and still has too many GV-specific hacks that need to be wrapped in config options:
+Working for both inbound and outbound calls.
+However, there are still has many GV-specific hacks that need to be cleaned up and either wrapped in config options or fixed to support more than a 1-and-only-1 gvsip endpoint environment.
 
 - registering with oauth token: WORKING
 - incoming calls: WORKING
-- outgoing calls: NOT working (don't receive a response to the INVITE request)
+- outgoing calls: WORKING
 
 ## Config example
 
@@ -23,6 +24,9 @@ server_uri=sip:obihai.sip.google.com
 outbound_proxy=sips:obihai.telephony.goog:5061\;lr
 client_uri=sip:88WHATEVER_1@obihai.sip.google.com
 retry_interval=60
+support_path=yes
+support_outbound=yes
+support_replaces=yes
 
 [gvsip]
 type=auth
@@ -46,14 +50,11 @@ allow=opus
 outbound_auth=gvsip
 outbound_proxy=sips:obihai.telephony.goog:5061\;lr
 aors=gvsip
-media_encryption=dtls
-dtls_cert_file=/etc/asterisk/keys/asterisk.crt
-dtls_private_key=/etc/asterisk/keys/asterisk.key
-dtls_setup=actpass
 direct_media=no
 ice_support=yes
 rtcp_mux=yes
 media_use_received_transport=yes
+outbound_registration=gvsip
 
 [gvsip]
 type=identify

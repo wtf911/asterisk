@@ -738,6 +738,8 @@ struct ast_sip_endpoint {
 		AST_STRING_FIELD(transport);
 		/*! Outbound proxy to use */
 		AST_STRING_FIELD(outbound_proxy);
+		/*! Outbound registration associated with this endpoint */
+		AST_STRING_FIELD(outbound_registration);
 		/*! Explicit AORs to dial if none are specified */
 		AST_STRING_FIELD(aors);
 		/*! Musiconhold class to suggest that the other side use when placing on hold */
