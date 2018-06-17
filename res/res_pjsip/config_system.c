@@ -52,6 +52,8 @@ struct system_config {
 	} threadpool;
 	/*! Nonzero to disable switching from UDP to TCP transport */
 	unsigned int disable_tcp_switch;
+	/*! Nonzero to disable SIP/SIPS checking */
+	unsigned int disable_secure_dlg_check;
 };
 
 static struct ast_threadpool_options sip_threadpool_options = {
@@ -110,8 +112,8 @@ static int system_apply(const struct ast_sorcery *system_sorcery, void *obj)
 	pjsip_cfg()->endpt.disable_tcp_switch =
 		system->disable_tcp_switch ? PJ_TRUE : PJ_FALSE;
 
-	//TODO: remove this hack?
-	pjsip_cfg()->endpt.disable_secure_dlg_check = PJ_TRUE;
+	pjsip_cfg()->endpt.disable_secure_dlg_check =
+		system->disable_secure_dlg_check ? PJ_TRUE : PJ_FALSE;
 
 	return 0;
 }
@@ -187,6 +189,8 @@ int ast_sip_initialize_system(void)
 			OPT_UINT_T, 0, FLDSET(struct system_config, threadpool.max_size));
 	ast_sorcery_object_field_register(system_sorcery, "system", "disable_tcp_switch", "yes",
 			OPT_BOOL_T, 1, FLDSET(struct system_config, disable_tcp_switch));
+	ast_sorcery_object_field_register(system_sorcery, "system", "disable_secure_dlg_check", "no",
+			OPT_BOOL_T, 1, FLDSET(struct system_config, disable_secure_dlg_check));
 
 	ast_sorcery_load(system_sorcery);
 

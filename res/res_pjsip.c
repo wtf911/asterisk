@@ -1660,6 +1660,9 @@
 						request is too large.  See RFC 3261 section 18.1.1.
 					</para></description>
 				</configOption>
+				<configOption name="disable_secure_dlg_check" default="no">
+					<synopsis>Disable SIP/SIPS checking.</synopsis>
+				</configOption>
 				<configOption name="type">
 					<synopsis>Must be of type 'system'.</synopsis>
 				</configOption>

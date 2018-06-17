@@ -6,7 +6,7 @@
 - outgoing calls: WORKING
 
 ## Known Issues
-- fix uply hack that globally sets pjsip disable_secure_dlg_check to get around sip/sips comparisons
+- TBD
 
 ## Config example
 
@@ -60,6 +60,10 @@ outbound_registration=gvsip
 type=identify
 endpoint=gvsip
 match=obihai.telephony.goog
+
+[gvsip]
+type=system
+disable_secure_dlg_check=yes
 ```
 
 ### rtp.conf
