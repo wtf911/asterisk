@@ -64,6 +64,10 @@ match=obihai.telephony.goog
 [gvsip]
 type=system
 disable_secure_dlg_check=yes
+
+[gvsip]
+type=global
+keep_alive_interval=300
 ```
 
 ### rtp.conf
