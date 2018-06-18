@@ -2354,7 +2354,8 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 
 	int size = AST_VECTOR_SIZE(&service_routes);
 
-	for (int i = 0; i < size; ++i)
+	int i;
+	for (i = 0; i < size; ++i)
 	{
 		pj_str_t service_route_str = AST_VECTOR_GET(&service_routes, i);
 		ast_log(LOG_DEBUG, "Found service-route. Adding route header for %s\n", service_route_str.ptr);
