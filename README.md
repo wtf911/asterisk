@@ -12,6 +12,15 @@
 
 ### pjsip.conf
 ```
+; if using chan_sip to host sip clients instead of chan_pjsip,
+; you wont have the (required) udp transport that supports those
+; clients. if so, just make a dummy one on a port that won't
+; conflict with chan_sip
+;[incoming-registrations-unused-but-required]
+;type=transport
+;protocol=udp
+;bind=0.0.0.0:9999
+
 [gvsip]
 type=transport
 protocol=tls
@@ -64,6 +73,7 @@ match=obihai.telephony.goog
 [gvsip]
 type=global
 keep_alive_interval=300
+;debug=true
 ```
 
 ### rtp.conf
