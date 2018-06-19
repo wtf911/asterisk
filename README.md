@@ -21,7 +21,7 @@ bind=0.0.0.0:5061
 type=registration
 outbound_auth=gvsip
 server_uri=sip:obihai.sip.google.com
-outbound_proxy=sips:obihai.telephony.goog:5061\;lr
+outbound_proxy=sip:obihai.telephony.goog:5061\;transport=tls\;lr
 client_uri=sip:88WHATEVER_1@obihai.sip.google.com
 retry_interval=60
 support_path=yes
@@ -48,7 +48,7 @@ disallow=all
 allow=ulaw
 allow=opus
 outbound_auth=gvsip
-outbound_proxy=sips:obihai.telephony.goog:5061\;lr\;hide
+outbound_proxy=sip:obihai.telephony.goog:5061\;transport=tls\;lr\;hide
 aors=gvsip
 direct_media=no
 ice_support=yes
@@ -60,10 +60,6 @@ outbound_registration=gvsip
 type=identify
 endpoint=gvsip
 match=obihai.telephony.goog
-
-[gvsip]
-type=system
-disable_secure_dlg_check=yes
 
 [gvsip]
 type=global
