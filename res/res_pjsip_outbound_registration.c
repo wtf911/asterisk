@@ -179,9 +179,6 @@
                                 <configOption name="support_outbound">
                                         <synopsis>Enables Outbound support for outbound REGISTER requests.</synopsis>
                                 </configOption>
-                                <configOption name="support_replaces">
-                                        <synopsis>Enables Replaces support for outbound REGISTER requests.</synopsis>
-                                </configOption>
 			</configObject>
 		</configFile>
 	</configInfo>
@@ -332,8 +329,6 @@ struct sip_outbound_registration {
 	unsigned int support_path;
         /*! \brief Whether Outbound support is enabled */
         unsigned int support_outbound;
-        /*! \brief Whether Replaces support is enabled */
-        unsigned int support_replaces;	
 };
 
 /* \brief Vector type to store service routes */
@@ -376,8 +371,6 @@ struct sip_outbound_registration_client_state {
 	unsigned int support_path;
         /*! \brief Determines whether SIP Outbound support should be advertised */
         unsigned int support_outbound;
-        /*! \brief Determines whether SIP Replaces support should be advertised */
-        unsigned int support_replaces;
 	/*! CSeq number of last sent auth request. */
 	unsigned int auth_cseq;
 	/*! \brief Serializer for stuff and things */
@@ -556,7 +549,6 @@ static void cancel_registration(struct sip_outbound_registration_client_state *c
 
 static pj_str_t PATH_NAME = { "path", 4 };
 static pj_str_t OUTBOUND_NAME = { "outbound", 8 };
-static pj_str_t REPLACES_NAME = { "replaces", 8 };
 
 /*! \brief Helper function which sends a message and cleans up, if needed, on failure */
 static pj_status_t registration_client_send(struct sip_outbound_registration_client_state *client_state,
@@ -654,12 +646,6 @@ static int handle_client_registration(void *data)
 			return -1;
 		}
 	}
-
-        if (client_state->support_replaces) {
-                if (!add_to_supported_header(tdata, &REPLACES_NAME)) {
-                        return -1;
-                }
-        }
 
 	registration_client_send(client_state, tdata);
 
@@ -1600,7 +1586,6 @@ static int sip_outbound_registration_perform(void *data)
 	state->client_state->retries = 0;
 	state->client_state->support_path = registration->support_path;
 	state->client_state->support_outbound = registration->support_outbound;
-	state->client_state->support_replaces = registration->support_replaces;
 	state->client_state->auth_rejection_permanent = registration->auth_rejection_permanent;
 
 	pjsip_regc_update_expires(state->client_state->client, registration->expiration);
@@ -2499,7 +2484,6 @@ static int load_module(void)
 	ast_sorcery_object_field_register_custom(ast_sip_get_sorcery(), "registration", "outbound_auth", "", outbound_auth_handler, outbound_auths_to_str, outbound_auths_to_var_list, 0, 0);
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_path", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_path));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_outbound", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_outbound));
-	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_replaces", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_replaces));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "line", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, line));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "endpoint", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, endpoint));
 
