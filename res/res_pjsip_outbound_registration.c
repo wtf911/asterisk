@@ -235,6 +235,9 @@
 	</manager>
  ***/
 
+static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
+                const struct ast_sip_auth_vector *auth_vector); /* forward decl */
+
 /*! \brief Some thread local storage used to determine if the running thread invoked the callback */
 AST_THREADSTORAGE(register_callback_invoked);
 
@@ -333,8 +336,13 @@ struct sip_outbound_registration {
         unsigned int support_replaces;	
 };
 
+/* \brief Vector type to store service routes */
 AST_VECTOR(service_route_vector_type, pj_str_t);
+
+/* \brief Caching pool to use to create pool to store saved pjsip stings */
 static pj_caching_pool cachingpool;
+
+/* \brief Pool to use to store save pjsip strings */
 static pj_pool_t *reg_pool;
 
 /*! \brief Outbound registration client state information (persists for lifetime of regc) */
@@ -614,6 +622,11 @@ static int handle_client_registration(void *data)
 {
 	RAII_VAR(struct sip_outbound_registration_client_state *, client_state, data, ao2_cleanup);
 	pjsip_tx_data *tdata;
+
+	if (set_outbound_initial_authentication_credentials(client_state->client, &client_state->outbound_auths)) {
+		ast_log(LOG_WARNING, "Failed to set initial authentication credentials\n");
+		return -1;
+	}
 
 	if (client_state->status == SIP_REGISTRATION_STOPPED
 		|| pjsip_regc_register(client_state->client, PJ_FALSE, &tdata) != PJ_SUCCESS) {
@@ -1365,6 +1378,7 @@ static int can_reuse_registration(struct sip_outbound_registration *existing,
 	return rc;
 }
 
+/* \brief Get google oauth2 access token using refresh token */
 static int fetch_access_token(struct ast_sip_auth *auth)
 {
         RAII_VAR(char *, cmd, NULL, ast_free);
@@ -1400,9 +1414,16 @@ static int fetch_access_token(struct ast_sip_auth *auth)
         return -1;
 }
 
-
-static int set_outbound_authentication_credentials(pjsip_regc *regc,
-                const struct ast_sip_auth_vector *auth_vector)
+/*!
+ * \internal
+ * \brief Set pjsip registration context with any authentication credientials that need to be
+ * sent in the initial registration request
+ *
+ * \param regc The pjsip registration context
+ * \param auth_vector The vector of configured authentication credientials
+ */
+static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
+		const struct ast_sip_auth_vector *auth_vector)
 {
         size_t auth_size = AST_VECTOR_SIZE(auth_vector);
         struct ast_sip_auth **auths = ast_alloca(auth_size * sizeof(*auths));
@@ -1416,11 +1437,11 @@ static int set_outbound_authentication_credentials(pjsip_regc *regc,
         }
 
         for (i = 0; i < auth_size; ++i) {
-                pj_cstr(&auth_creds[0].username, auths[i]->auth_user);
-                pj_cstr(&auth_creds[0].scheme, "Bearer");
-                pj_cstr(&auth_creds[0].realm, auths[i]->realm);
                 switch (auths[i]->type) {
                 case AST_SIP_AUTH_TYPE_OAUTH:
+			pj_cstr(&auth_creds[0].username, auths[i]->auth_user);
+			pj_cstr(&auth_creds[0].scheme, "Bearer");
+			pj_cstr(&auth_creds[0].realm, auths[i]->realm);
 			ast_debug(2, "Obtaining OAuth access token");
 			if (fetch_access_token(auths[i])) {
 				ast_log(LOG_WARNING, "Obtaining OAuth access token failed");
@@ -1441,6 +1462,7 @@ static int set_outbound_authentication_credentials(pjsip_regc *regc,
 
                         break;
 		default:
+			//other cases handled after receiving auth rejection
 			break;
                 }
         }
@@ -1508,11 +1530,6 @@ static int sip_outbound_registration_regc_alloc(void *data)
 			&state->client_state->client) != PJ_SUCCESS) {
 		return -1;
 	}
-
-        if (set_outbound_authentication_credentials(state->client_state->client, &registration->outbound_auths)) {
-                ast_log(LOG_WARNING, "Failed to set authentication credentials\n");
-                return -1;
-        }
 
 	ast_sip_set_tpselector_from_transport_name(registration->transport, &selector);
 	pjsip_regc_set_transport(state->client_state->client, &selector);
@@ -2331,8 +2348,6 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 		return;
 	}
 
-	static const pj_str_t route_str = { "Route", 5 };
-
 	RAII_VAR(struct ao2_container *, states, NULL, ao2_cleanup);
 	states = ao2_global_obj_ref(current_states);
 	if (!states) {
@@ -2360,6 +2375,7 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 		pj_str_t service_route_str = AST_VECTOR_GET(&service_routes, i);
 		ast_log(LOG_DEBUG, "Found service-route. Adding route header for %s\n", service_route_str.ptr);
 
+		static const pj_str_t route_str = { "Route", 5 };
 		pjsip_generic_string_hdr* route_hdr;
 		route_hdr = pjsip_generic_string_hdr_create(tdata->pool, &route_str, &service_route_str);
  
