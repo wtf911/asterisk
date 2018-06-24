@@ -31,7 +31,7 @@ type=registration
 outbound_auth=gvsip
 server_uri=sip:obihai.sip.google.com
 outbound_proxy=sip:obihai.telephony.goog:5061\;transport=tls\;lr
-client_uri=sip:88WHATEVER_1@obihai.sip.google.com
+client_uri=sip:<your choice for device identifier>@obihai.sip.google.com
 retry_interval=60
 support_path=yes
 support_outbound=yes
@@ -43,7 +43,7 @@ auth_type=oauth
 refresh_token=<your oauth refresh token>
 oauth_clientid=<your oauth client id>
 oauth_secret=<your oauth client secret>
-username=88WHATEVER_1
+username=<your choice for device identifier>
 realm=obihai.sip.google.com
 
 [gvsip]
