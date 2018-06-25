@@ -71,8 +71,7 @@ match=obihai.telephony.goog
 
 [gvsip]
 type=global
-keep_alive_interval=300
-;debug=true
+debug=true
 ```
 
 ### rtp.conf
