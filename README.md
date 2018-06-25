@@ -6,7 +6,7 @@
 - outgoing calls: WORKING
 
 ## Known Issues
-- TBD
+- outgoing calls that are not answered within 25 seconds do not go to voicemail, instead receiving a 'SIP/2.0 603 media inactivity' response and terminating
 
 ## Config example
 
