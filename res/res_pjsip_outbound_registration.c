@@ -176,9 +176,9 @@
 						header as necessary.
 					</para></description>
 				</configOption>
-                                <configOption name="support_outbound">
-                                        <synopsis>Enables Outbound support for outbound REGISTER requests.</synopsis>
-                                </configOption>
+				<configOption name="support_outbound">
+					<synopsis>Enables Outbound support for outbound REGISTER requests.</synopsis>
+				</configOption>
 			</configObject>
 		</configFile>
 	</configInfo>
@@ -233,7 +233,7 @@
  ***/
 
 static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
-                const struct ast_sip_auth_vector *auth_vector); /* forward decl */
+		const struct ast_sip_auth_vector *auth_vector); /* forward decl */
 
 /*! \brief Some thread local storage used to determine if the running thread invoked the callback */
 AST_THREADSTORAGE(register_callback_invoked);
@@ -327,8 +327,8 @@ struct sip_outbound_registration {
 	struct ast_sip_auth_vector outbound_auths;
 	/*! \brief Whether Path support is enabled */
 	unsigned int support_path;
-        /*! \brief Whether Outbound support is enabled */
-        unsigned int support_outbound;
+	/*! \brief Whether Outbound support is enabled */
+	unsigned int support_outbound;
 };
 
 /* \brief Vector type to store service routes */
@@ -369,18 +369,18 @@ struct sip_outbound_registration_client_state {
 	unsigned int auth_rejection_permanent;
 	/*! \brief Determines whether SIP Path support should be advertised */
 	unsigned int support_path;
-        /*! \brief Determines whether SIP Outbound support should be advertised */
-        unsigned int support_outbound;
+	/*! \brief Determines whether SIP Outbound support should be advertised */
+	unsigned int support_outbound;
 	/*! CSeq number of last sent auth request. */
 	unsigned int auth_cseq;
 	/*! \brief Serializer for stuff and things */
 	struct ast_taskprocessor *serializer;
 	/*! \brief Configured authentication credentials */
 	struct ast_sip_auth_vector outbound_auths;
-        /*! \brief List of service-routes in register response */
+	/*! \brief List of service-routes in register response */
 	struct service_route_vector_type service_route_vector;
-        /*! \brief P-Associated-URI from register response */
-        pj_str_t associated_uri;
+	/*! \brief P-Associated-URI from register response */
+	pj_str_t associated_uri;
 	/*! \brief Registration should be destroyed after completion of transaction */
 	unsigned int destroy:1;
 	/*! \brief Non-zero if we have attempted sending a REGISTER with authentication */
@@ -635,13 +635,13 @@ static int handle_client_registration(void *data)
 			(int) info.client_uri.slen, info.client_uri.ptr);
 	}
 
-        if (client_state->support_path) {
-                if (!add_to_supported_header(tdata, &PATH_NAME)) {
-                        return -1;
-                }
-        }
+	if (client_state->support_path) {
+		if (!add_to_supported_header(tdata, &PATH_NAME)) {
+			return -1;
+		}
+	}
 
-        if (client_state->support_outbound) {
+	if (client_state->support_outbound) {
 		if (!add_to_supported_header(tdata, &OUTBOUND_NAME)) {
 			return -1;
 		}
@@ -937,21 +937,21 @@ static void registration_transport_monitor_setup(pjsip_transport *transport, con
 
 static void save_response_fields_to_client_state(struct registration_response *response)
 {
-        pjsip_hdr *h;
-        pjsip_msg *msg;
+	pjsip_hdr *h;
+	pjsip_msg *msg;
 
 	static const pj_str_t service_route_str = { "Service-Route", 13 };
 
-        AST_VECTOR_INIT(&response->client_state->service_route_vector, 0);
-        msg = response->rdata->msg_info.msg;
+	AST_VECTOR_INIT(&response->client_state->service_route_vector, 0);
+	msg = response->rdata->msg_info.msg;
 	h = NULL;
-        while((h = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &service_route_str, h == NULL ? NULL : h->next))) {
+	while((h = (pjsip_hdr*)pjsip_msg_find_hdr_by_name(msg, &service_route_str, h == NULL ? NULL : h->next))) {
 		pj_str_t value = ((pjsip_generic_string_hdr*)h)->hvalue;
 		pj_str_t copy;
 		pj_strdup_with_null(reg_pool, &copy, &value);
 		AST_VECTOR_APPEND(&response->client_state->service_route_vector, copy);
 		ast_log(LOG_DEBUG, "Stored service-route: %s\n", copy.ptr);
-        }
+	}
 
 	static const pj_str_t associated_uri_str = { "P-Associated-URI", 16 };
 	pjsip_hdr* associated_uri_hdr;
@@ -1367,37 +1367,36 @@ static int can_reuse_registration(struct sip_outbound_registration *existing,
 /* \brief Get google oauth2 access token using refresh token */
 static int fetch_access_token(struct ast_sip_auth *auth)
 {
-        RAII_VAR(char *, cmd, NULL, ast_free);
-        char cBuf[1024] = "";
-        const char *url = "https://www.googleapis.com/oauth2/v3/token";
-        struct ast_json_error error;
-        RAII_VAR(struct ast_json *, jobj, NULL, ast_json_unref);
+	RAII_VAR(char *, cmd, NULL, ast_free);
+	char cBuf[1024] = "";
+	const char *url = "https://www.googleapis.com/oauth2/v3/token";
+	struct ast_json_error error;
+	RAII_VAR(struct ast_json *, jobj, NULL, ast_json_unref);
 
-        ast_asprintf(&cmd, "CURL(%s,client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token)",
-                     url, auth->oauth_clientid, auth->oauth_secret, auth->refresh_token);
+	ast_asprintf(&cmd, "CURL(%s,client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token)",
+		     url, auth->oauth_clientid, auth->oauth_secret, auth->refresh_token);
 
-        ast_debug(2, "Performing OAuth 2.0 authentication for using command: %s\n", cmd);
+	ast_debug(2, "Performing OAuth 2.0 authentication using command: %s\n", cmd);
 
-        if (ast_func_read(NULL, cmd, cBuf, sizeof(cBuf) - 1)) {
-                ast_log(LOG_ERROR, "CURL is unavailable. This is required for OAuth 2.0 authentication. Please ensure it is loaded.\n");
-                return -1;
-        }
+	if (ast_func_read(NULL, cmd, cBuf, sizeof(cBuf) - 1)) {
+		ast_log(LOG_ERROR, "CURL is unavailable. This is required for OAuth 2.0 authentication. Please ensure it is loaded.\n");
+		return -1;
+	}
 
-        ast_debug(2, "OAuth 2.0 authentication returned: %s\n", cBuf);
+	ast_debug(2, "OAuth 2.0 authentication returned: %s\n", cBuf);
 
-        jobj = ast_json_load_string(cBuf, &error);
-        if (jobj) {
-                const char *token = ast_json_string_get(ast_json_object_get(jobj, "access_token"));
-                if (token) {
-			ast_debug(2, "got %s", token);
-                        ast_string_field_set(auth, auth_pass, token);
-                        return 0;
-                }
-        }
+	jobj = ast_json_load_string(cBuf, &error);
+	if (jobj) {
+		const char *token = ast_json_string_get(ast_json_object_get(jobj, "access_token"));
+		if (token) {
+			ast_string_field_set(auth, auth_pass, token);
+			return 0;
+		}
+	}
 
-        ast_log(LOG_ERROR, "An error occurred while performing OAuth 2.0 authentication: %s\n", cBuf);
+	ast_log(LOG_ERROR, "An error occurred while performing OAuth 2.0 authentication: %s\n", cBuf);
 
-        return -1;
+	return -1;
 }
 
 /*!
@@ -1411,20 +1410,20 @@ static int fetch_access_token(struct ast_sip_auth *auth)
 static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
 		const struct ast_sip_auth_vector *auth_vector)
 {
-        size_t auth_size = AST_VECTOR_SIZE(auth_vector);
-        struct ast_sip_auth **auths = ast_alloca(auth_size * sizeof(*auths));
-        pjsip_cred_info *auth_creds = ast_alloca(1 * sizeof(*auth_creds));
-        int res = 0;
-        int i;
+	size_t auth_size = AST_VECTOR_SIZE(auth_vector);
+	struct ast_sip_auth **auths = ast_alloca(auth_size * sizeof(*auths));
+	pjsip_cred_info *auth_creds = ast_alloca(1 * sizeof(*auth_creds));
+	int res = 0;
+	int i;
 
-        if (ast_sip_retrieve_auths(auth_vector, auths)) {
-                res = -1;
-                goto cleanup;
-        }
+	if (ast_sip_retrieve_auths(auth_vector, auths)) {
+		res = -1;
+		goto cleanup;
+	}
 
-        for (i = 0; i < auth_size; ++i) {
-                switch (auths[i]->type) {
-                case AST_SIP_AUTH_TYPE_OAUTH:
+	for (i = 0; i < auth_size; ++i) {
+		switch (auths[i]->type) {
+		case AST_SIP_AUTH_TYPE_OAUTH:
 			pj_cstr(&auth_creds[0].username, auths[i]->auth_user);
 			pj_cstr(&auth_creds[0].scheme, "Bearer");
 			pj_cstr(&auth_creds[0].realm, auths[i]->realm);
@@ -1446,16 +1445,16 @@ static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
 			pj_cstr(&prefs.algorithm, "oauth");
 			pjsip_regc_set_prefs(regc, &prefs);
 
-                        break;
+			break;
 		default:
 			//other cases handled after receiving auth rejection
 			break;
-                }
-        }
+		}
+	}
 
 cleanup:
-        ast_sip_cleanup_auths(auths, auth_size);
-        return res;
+	ast_sip_cleanup_auths(auths, auth_size);
+	return res;
 }
 
 
@@ -2317,8 +2316,8 @@ static void network_change_stasis_cb(void *data, struct stasis_subscription *sub
 /*! \brief Callback function for matching an outbound registration based on name */
 static int find_registration(void *obj, void *arg, int flags)
 {
-        struct sip_outbound_registration_state *state = obj;
-        const char* target_name = arg;
+	struct sip_outbound_registration_state *state = obj;
+	const char* target_name = arg;
 
 	const char* registration_name = ast_sorcery_object_get_id(state->registration);
 
