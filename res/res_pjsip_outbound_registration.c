@@ -1373,13 +1373,19 @@ static int fetch_access_token(struct ast_sip_auth *auth)
 	struct ast_json_error error;
 	RAII_VAR(struct ast_json *, jobj, NULL, ast_json_unref);
 
+	//set timeout to be shorter than default 180s (also checks func_curl is available)
+	if (ast_func_write(NULL, "CURLOPT(conntimeout)", "10")) {
+		ast_log(LOG_ERROR, "CURL is unavailable. This is required for OAuth 2.0 authentication. Please ensure it is loaded.\n");
+		return -1;
+	}
+
 	ast_asprintf(&cmd, "CURL(%s,client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token)",
 		     url, auth->oauth_clientid, auth->oauth_secret, auth->refresh_token);
 
 	ast_debug(2, "Performing OAuth 2.0 authentication using command: %s\n", cmd);
 
 	if (ast_func_read(NULL, cmd, cBuf, sizeof(cBuf) - 1)) {
-		ast_log(LOG_ERROR, "CURL is unavailable. This is required for OAuth 2.0 authentication. Please ensure it is loaded.\n");
+		ast_log(LOG_ERROR, "An error occurred while retreiving OAuth 2.0 access token\n");
 		return -1;
 	}
 
@@ -1427,12 +1433,12 @@ static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
 			pj_cstr(&auth_creds[0].username, auths[i]->auth_user);
 			pj_cstr(&auth_creds[0].scheme, "Bearer");
 			pj_cstr(&auth_creds[0].realm, auths[i]->realm);
-			ast_debug(2, "Obtaining OAuth access token");
+			ast_debug(2, "Obtaining OAuth access token\n");
 			if (fetch_access_token(auths[i])) {
-				ast_log(LOG_WARNING, "Obtaining OAuth access token failed");
+				ast_log(LOG_WARNING, "Obtaining OAuth access token failed\n");
 				res = -1;
 			}
-			ast_debug(2, "Setting data to %s", auths[i]->auth_pass);
+			ast_debug(2, "Setting data to %s\n", auths[i]->auth_pass);
 
 			pj_cstr(&auth_creds[0].data, auths[i]->auth_pass);
 			auth_creds[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
