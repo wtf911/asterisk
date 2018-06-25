@@ -398,9 +398,9 @@
 				<configOption name="outbound_proxy">
 					<synopsis>Full SIP URI of the outbound proxy used to send requests</synopsis>
 				</configOption>
-                                <configOption name="outbound_registration">
-                                        <synopsis>Name of the registration config associated with this endpoint</synopsis>
-                                </configOption>
+				<configOption name="outbound_registration">
+					<synopsis>Name of the registration config associated with this endpoint</synopsis>
+				</configOption>
 				<configOption name="rewrite_contact">
 					<synopsis>Allow Contact header to be rewritten with the source IP address-port</synopsis>
 					<description><para>
@@ -2081,9 +2081,9 @@
 				<parameter name="OutboundProxy">
 					<para><xi:include xpointer="xpointer(/docs/configInfo[@name='res_pjsip']/configFile[@name='pjsip.conf']/configObject[@name='endpoint']/configOption[@name='outbound_proxy']/synopsis/node())"/></para>
 				</parameter>
-                                <parameter name="OutboundRegistration">
-                                        <para><xi:include xpointer="xpointer(/docs/configInfo[@name='res_pjsip']/configFile[@name='pjsip.conf']/configObject[@name='endpoint']/configOption[@name='outbound_registration']/synopsis/node())"/></para>
-                                </parameter>
+				<parameter name="OutboundRegistration">
+					<para><xi:include xpointer="xpointer(/docs/configInfo[@name='res_pjsip']/configFile[@name='pjsip.conf']/configObject[@name='endpoint']/configOption[@name='outbound_registration']/synopsis/node())"/></para>
+				</parameter>
 				<parameter name="MohSuggest">
 					<para><xi:include xpointer="xpointer(/docs/configInfo[@name='res_pjsip']/configFile[@name='pjsip.conf']/configObject[@name='endpoint']/configOption[@name='moh_suggest']/synopsis/node())"/></para>
 				</parameter>

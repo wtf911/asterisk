@@ -401,8 +401,8 @@ enum ast_sip_auth_type {
 	AST_SIP_AUTH_TYPE_USER_PASS,
 	/*! Credentials stored as an MD5 sum */
 	AST_SIP_AUTH_TYPE_MD5,
-        /*! Oauth */
-        AST_SIP_AUTH_TYPE_OAUTH,
+	/*! Oauth */
+	AST_SIP_AUTH_TYPE_OAUTH,
 	/*! Credentials not stored this is a fake auth */
 	AST_SIP_AUTH_TYPE_ARTIFICIAL
 };
