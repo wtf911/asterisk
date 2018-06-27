@@ -2386,7 +2386,7 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 
 
 static struct ast_sip_session_supplement gvsip_supplement = {
-	.method = "INVITE",
+	.method = "INVITE, CANCEL",
 	.outgoing_request = handle_outgoing_request,
 	.priority = AST_SIP_SUPPLEMENT_PRIORITY_LAST,
 };
