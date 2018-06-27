@@ -6,7 +6,7 @@
 - outgoing calls: WORKING
 
 ## Known Issues
-- outgoing calls that are not answered within 25 seconds do not go to voicemail, instead receiving a 'SIP/2.0 603 media inactivity' response and terminating
+see https://github.com/naf419/asterisk/wiki
 
 ## Config example
 
