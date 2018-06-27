@@ -609,6 +609,26 @@ static int add_to_supported_header(pjsip_tx_data *tdata, pj_str_t *name)
 	return 1;
 }
 
+/*! \brief Helper function to add configured supported headers */
+static int add_configured_supported_headers(struct sip_outbound_registration_client_state *client_state, pjsip_tx_data *tdata)
+{
+	int res = 0;
+
+	if (client_state->support_path) {
+		if (!add_to_supported_header(tdata, &PATH_NAME)) {
+			res = -1;
+		}
+	}
+
+	if (client_state->support_outbound) {
+		if (!add_to_supported_header(tdata, &OUTBOUND_NAME)) {
+			res = -1;
+		}
+	}
+
+	return res;
+}
+
 /*! \brief Callback function for registering */
 static int handle_client_registration(void *data)
 {
@@ -635,16 +655,9 @@ static int handle_client_registration(void *data)
 			(int) info.client_uri.slen, info.client_uri.ptr);
 	}
 
-	if (client_state->support_path) {
-		if (!add_to_supported_header(tdata, &PATH_NAME)) {
-			return -1;
-		}
-	}
-
-	if (client_state->support_outbound) {
-		if (!add_to_supported_header(tdata, &OUTBOUND_NAME)) {
-			return -1;
-		}
+	if (add_configured_supported_headers(client_state, tdata)) {
+		ast_log(LOG_WARNING, "Failed to set supported headers\n");
+		return -1;
 	}
 
 	registration_client_send(client_state, tdata);
@@ -757,6 +770,7 @@ static int handle_client_state_destruction(void *data)
 			update_client_state_status(client_state, SIP_REGISTRATION_STOPPING);
 			client_state->destroy = 1;
 			if (pjsip_regc_unregister(client_state->client, &tdata) == PJ_SUCCESS
+				&& add_configured_supported_headers(client_state, tdata) == 0 
 				&& registration_client_send(client_state, tdata) == PJ_SUCCESS) {
 				ao2_ref(client_state, -1);
 				return 0;
