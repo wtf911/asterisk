@@ -30,7 +30,7 @@ bind=0.0.0.0:5061
 type=registration
 outbound_auth=gvsip
 server_uri=sip:obihai.sip.google.com
-outbound_proxy=sip:obihai.telephony.goog:5061\;transport=tls\;lr
+outbound_proxy=sip:obihai.telephony.goog:5061\;transport=tls\;lr\;hide
 client_uri=sip:<your choice for device identifier>@obihai.sip.google.com
 retry_interval=60
 support_path=yes
@@ -85,5 +85,5 @@ stunaddr=stun.l.google.com:19302
 [from-internal]
 exten => _NXXNXXXXXX,1,Set(CALLERID(dnid)=1${CALLERID(dnid)})
 exten => _NXXNXXXXXX,n,Goto(1${EXTEN},1)
-exten => _1NXXNXXXXXX,1,Dial(PJSIP/${EXTEN}@gvsip,,r)
+exten => _1NXXNXXXXXX,1,Dial(PJSIP/${EXTEN}@gvsip)
 ```
