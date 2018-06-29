@@ -1744,7 +1744,8 @@ static int unregister_task(void *obj)
 
 	cancel_registration(state->client_state);
 
-	if (pjsip_regc_unregister(client, &tdata) == PJ_SUCCESS) {
+	if (pjsip_regc_unregister(client, &tdata) == PJ_SUCCESS
+		&& add_configured_supported_headers(state->client_state, tdata)) {
 		registration_client_send(state->client_state, tdata);
 	}
 
