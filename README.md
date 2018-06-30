@@ -35,6 +35,8 @@ client_uri=sip:<your choice for device identifier>@obihai.sip.google.com
 retry_interval=60
 support_path=yes
 support_outbound=yes
+line=yes
+endpoint=gvsip
 
 [gvsip]
 type=auth
@@ -63,11 +65,6 @@ ice_support=yes
 rtcp_mux=yes
 media_use_received_transport=yes
 outbound_registration=gvsip
-
-[gvsip]
-type=identify
-endpoint=gvsip
-match=obihai.telephony.goog
 
 [gvsip]
 type=global
