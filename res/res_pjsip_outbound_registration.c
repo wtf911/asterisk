@@ -2408,7 +2408,7 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 		static const int ADDR_SIZE_MAX = 20;
 		char tmp_addr[ADDR_SIZE_MAX];
 		pj_sockaddr_print(&tdata->dest_info.addr.entry[0].addr, tmp_addr, ADDR_SIZE_MAX, 3);
-		ast_log(LOG_DEBUG, "Re-using outbound registration addresss of %s", tmp_addr);
+		ast_log(LOG_DEBUG, "Re-using outbound registration address of %s\n", tmp_addr);
 	}
 }
 
