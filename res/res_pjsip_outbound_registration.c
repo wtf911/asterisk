@@ -381,6 +381,8 @@ struct sip_outbound_registration_client_state {
 	struct service_route_vector_type service_route_vector;
 	/*! \brief P-Associated-URI from register response */
 	pj_str_t associated_uri;
+	/*! \brief dest_info from original registration request */
+	pjsip_dest_info orig_dest_info;
 	/*! \brief Registration should be destroyed after completion of transaction */
 	unsigned int destroy:1;
 	/*! \brief Non-zero if we have attempted sending a REGISTER with authentication */
@@ -972,6 +974,9 @@ static void save_response_fields_to_client_state(struct registration_response *r
 		pj_strdup_with_null(reg_pool, &response->client_state->associated_uri, &value);
 		ast_log(LOG_DEBUG, "Stored associated uri length %ld: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
 	}
+
+	pj_memcpy(&response->client_state->orig_dest_info, &response->old_request->dest_info,
+		sizeof(pjsip_dest_info));
 }
 
 
@@ -2395,6 +2400,9 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 	// add outbound & path to supported header
 	add_to_supported_header(tdata, &PATH_NAME);
 	add_to_supported_header(tdata, &OUTBOUND_NAME);
+
+	// copy registration's resolved host ip to invite
+	pj_memcpy(&tdata->dest_info, &state->client_state->orig_dest_info, sizeof(pjsip_dest_info));
 }
 
 

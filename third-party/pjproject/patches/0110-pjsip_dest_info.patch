@@ -1,0 +1,45 @@
+--- a/pjsip/include/pjsip/sip_transport.h	2017-02-19 19:16:58.000000000 -0600
++++ b/pjsip/include/pjsip/sip_transport.h	2018-07-02 10:11:08.178847564 -0500
+@@ -491,6 +491,19 @@
+ } pjsip_tx_data_op_key;
+ 
+ 
++typedef struct pjsip_dest_info
++{
++    /** Server name. */
++    pj_str_t                 name;
++
++    /** Server addresses resolved. */
++    pjsip_server_addresses   addr;
++
++    /** Current server address being tried. */
++    unsigned cur_addr;
++} pjsip_dest_info;
++
++
+ /**
+  * Data structure for sending outgoing message. Application normally creates
+  * this buffer by calling #pjsip_endpt_create_tdata.
+@@ -574,21 +587,7 @@
+      *  request goes to the same physical network address as the INVITE
+      *  request.
+      */
+-    struct
+-    {
+-	/** Server name. 
+-	 */
+-	pj_str_t		 name;
+-
+-	/** Server addresses resolved. 
+-	 */
+-	pjsip_server_addresses   addr;
+-
+-	/** Current server address being tried. 
+-	 */
+-	unsigned cur_addr;
+-
+-    } dest_info;
++    pjsip_dest_info	dest_info;
+ 
+     /** Transport information, only valid during on_tx_request() and 
+      *  on_tx_response() callback.
