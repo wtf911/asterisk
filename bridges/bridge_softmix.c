@@ -2085,7 +2085,9 @@ static void remb_enable_collection(struct ast_bridge *bridge, struct ast_bridge_
 		}
 	}
 
-	if (AST_VECTOR_REPLACE(&softmix_data->remb_collectors, bridge_stream_position, ao2_bump(sc->remb_collector))) {
+	ao2_ref(sc->remb_collector, +1);
+	if (AST_VECTOR_REPLACE(&softmix_data->remb_collectors, bridge_stream_position,
+		sc->remb_collector)) {
 		ao2_ref(sc->remb_collector, -1);
 	}
 }
@@ -2218,6 +2220,8 @@ static void softmix_bridge_stream_topology_changed(struct ast_bridge *bridge, st
 		ast_channel_unlock(participant->chan);
 		ast_bridge_channel_unlock(participant);
 	}
+
+	AST_VECTOR_FREE(&media_types);
 }
 
 static struct ast_bridge_technology softmix_bridge = {
