@@ -1385,7 +1385,7 @@ static int can_reuse_registration(struct sip_outbound_registration *existing,
 static int fetch_access_token(struct ast_sip_auth *auth)
 {
 	RAII_VAR(char *, cmd, NULL, ast_free);
-	char cBuf[1024] = "";
+	char cBuf[4096] = "";
 	const char *url = "https://www.googleapis.com/oauth2/v3/token";
 	struct ast_json_error error;
 	RAII_VAR(struct ast_json *, jobj, NULL, ast_json_unref);
