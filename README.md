@@ -37,6 +37,7 @@ support_path=yes
 support_outbound=yes
 line=yes
 endpoint=gvsip
+contact_additional_params=obn=<name to appear in GVSIP settings page>
 
 [gvsip]
 type=auth

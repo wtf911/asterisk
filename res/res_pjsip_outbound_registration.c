@@ -81,6 +81,9 @@
 				<configOption name="contact_user">
 					<synopsis>Contact User to use in request</synopsis>
 				</configOption>
+				<configOption name="contact_additional_params">
+					<synopsis>Additional parameters for contact</synopsis>
+				</configOption>
 				<configOption name="expiration" default="3600">
 					<synopsis>Expiration time for registrations in seconds</synopsis>
 				</configOption>
@@ -302,6 +305,8 @@ struct sip_outbound_registration {
 		AST_STRING_FIELD(client_uri);
 		/*! \brief Optional user for contact header */
 		AST_STRING_FIELD(contact_user);
+		/*! \bried Optional additional parameters for contact */
+		AST_STRING_FIELD(contact_additional_params);
 		/*! \brief Explicit transport to use for registration */
 		AST_STRING_FIELD(transport);
 		/*! \brief Outbound proxy to use */
@@ -334,7 +339,7 @@ struct sip_outbound_registration {
 /* \brief Vector type to store service routes */
 AST_VECTOR(service_route_vector_type, pj_str_t);
 
-/* \brief Caching pool to use to create pool to store saved pjsip stings */
+/* \brief Caching pool to use to create pool to store saved pjsip strings */
 static pj_caching_pool cachingpool;
 
 /* \brief Pool to use to store save pjsip strings */
@@ -1480,6 +1485,28 @@ cleanup:
 	return res;
 }
 
+/*! \brief Helper to convert ; seperated list to pjsip_param list */
+static pjsip_param* get_params_list_from_string(const char* param_string)
+{
+	pjsip_param *params = PJ_POOL_ALLOC_T(reg_pool, pjsip_param);
+	params = PJ_POOL_ALLOC_T(reg_pool, pjsip_param);
+	pj_list_init(params);
+
+	char *buf = ast_strdupa(param_string);
+	char *word, *next = buf;
+	while ((word = strsep(&next, ";"))) {
+		char name[31];
+		char value[31];
+		if (sscanf(word, "%30[^=]=%30[^=]", name, value) == 2) {
+			pjsip_param *param = PJ_POOL_ALLOC_T(reg_pool, pjsip_param);
+			pj_strdup2_with_null(reg_pool, &param->name, name);
+			pj_strdup2_with_null(reg_pool, &param->value, value);
+			pj_list_insert_after(params, param);
+		}
+	}
+
+	return params;
+}
 
 /*! \brief Helper function that allocates a pjsip registration client and configures it */
 static int sip_outbound_registration_regc_alloc(void *data)
@@ -1578,6 +1605,11 @@ static int sip_outbound_registration_regc_alloc(void *data)
 	if (pjsip_regc_init(state->client_state->client, &server_uri, &client_uri,
 		&client_uri, 1, &contact_uri, registration->expiration) != PJ_SUCCESS) {
 		return -1;
+	}
+
+	if (!ast_strlen_zero(registration->contact_additional_params)) {
+		pjsip_param *params = get_params_list_from_string(registration->contact_additional_params);
+		pjsip_regc_update_contact(state->client_state->client, 1, &contact_uri, params);
 	}
 
 	return 0;
@@ -2506,6 +2538,7 @@ static int load_module(void)
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "server_uri", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, server_uri));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "client_uri", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, client_uri));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "contact_user", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, contact_user));
+	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "contact_additional_params", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, contact_additional_params));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "transport", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, transport));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "outbound_proxy", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, outbound_proxy));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "expiration", "3600", OPT_UINT_T, 0, FLDSET(struct sip_outbound_registration, expiration));
