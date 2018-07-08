@@ -567,6 +567,17 @@ static void cancel_registration(struct sip_outbound_registration_client_state *c
 static pj_str_t PATH_NAME = { "path", 4 };
 static pj_str_t OUTBOUND_NAME = { "outbound", 8 };
 
+/*! \brief Helper to send message on specified transport */
+static pj_status_t send_on_transport(struct sip_outbound_registration_client_state *client_state, 
+	pjsip_tx_data *tdata)
+{
+        pjsip_tpselector selector = { .type = PJSIP_TPSELECTOR_TRANSPORT, };
+        selector.u.transport = client_state->transport;
+
+        pjsip_regc_set_transport(client_state->client, &selector);
+        return pjsip_regc_send(client_state->client, tdata);
+}
+
 struct stateless_send_resolver_callback_data
 {
 	struct sip_outbound_registration_client_state *client_state;
@@ -577,16 +588,22 @@ struct stateless_send_resolver_callback_data
 static void
 stateless_send_resolver_callback( pj_status_t status, void *token, const struct pjsip_server_addresses *addr)
 {
-	struct stateless_send_resolver_callback_data *data = (struct stateless_send_resolver_callback_data*) token;
+	RAII_VAR(struct stateless_send_resolver_callback_data *, data, token, ast_free);
+
+	//struct stateless_send_resolver_callback_data *data = (struct stateless_send_resolver_callback_data*) token;
 	struct sip_outbound_registration_client_state *client_state = data->client_state;
 	pjsip_tx_data *tdata = data->tdata;
+
+	if (status != PJ_SUCCESS) {
+		ast_log(LOG_ERROR, "Resolver failed. Cannot send message");
+	}
 
 	pjsip_tpselector orig_selector = { .type = PJSIP_TPSELECTOR_NONE, };
 	ast_sip_set_tpselector_from_transport_name(client_state->transport_name, &orig_selector);
 
 	if (orig_selector.type != PJSIP_TPSELECTOR_LISTENER)
 	{
-		ast_log(LOG_ERROR, "Error: transport_reuse requires setting a transport\n");
+		ast_log(LOG_ERROR, "transport_reuse requires setting a transport\n");
 		status = PJ_EUNKNOWN;
 		return;
 	}
@@ -613,20 +630,46 @@ stateless_send_resolver_callback( pj_status_t status, void *token, const struct 
 			&client_state->transport);
 	}
 
-	pjsip_tpselector new_selector = { .type = PJSIP_TPSELECTOR_TRANSPORT, };
-	new_selector.u.transport = client_state->transport;
+	ast_log(LOG_DEBUG, "Registration using newly created transport %p\n", (void*)client_state->transport);
+	send_on_transport(client_state, tdata);
+}
 
-	ast_log(LOG_DEBUG, "Registration using specific transport %p\n", (void*)client_state->transport);
+/*! \brief Send a message using a manually-built transport */
+static pj_status_t registration_client_send_manual(struct sip_outbound_registration_client_state *client_state,
+        pjsip_tx_data *tdata)
+{
+	pj_status_t status;
 
-	pjsip_regc_set_transport(client_state->client, &new_selector);
-	status = pjsip_regc_send(client_state->client, tdata);
+	/* Due to the message going out the callback may now be invoked, so bump the count */
+	ao2_ref(client_state, +1);
 
-	ast_free(data);
+	/* If we already have a transport, just use it. */
+	if (client_state->transport) {
+		ast_log(LOG_DEBUG, "Registration re-using transport %p\n", (void*)client_state->transport);
+		return send_on_transport(client_state, tdata);
+	}
+
+	/* If not, then create a new one. First, resolve the endpoint's host */
+	pjsip_host_info dest_info;
+	status = pjsip_process_route_set(tdata, &dest_info);
+
+	if (status != PJ_SUCCESS)
+		return status;
+
+	struct stateless_send_resolver_callback_data* data = ast_malloc(sizeof(struct stateless_send_resolver_callback_data));
+	data->client_state = client_state;
+	data->tdata = tdata;
+
+	pj_strdup(tdata->pool, &tdata->dest_info.name, &dest_info.addr.host);
+	pjsip_endpt_resolve( ast_sip_get_pjsip_endpoint(), tdata->pool, &dest_info, data,
+				&stateless_send_resolver_callback);
+
+	return status;
 }
 
 
-/*! \brief Helper function which sends a message and cleans up, if needed, on failure */
-static pj_status_t registration_client_send(struct sip_outbound_registration_client_state *client_state,
+/*! \brief Send a message using a transport from the normal pjsip transport factory */
+static pj_status_t registration_client_send_normal(struct sip_outbound_registration_client_state *client_state,
 	pjsip_tx_data *tdata)
 {
 	pj_status_t status;
@@ -642,29 +685,6 @@ static pj_status_t registration_client_send(struct sip_outbound_registration_cli
 
 	/* Due to the message going out the callback may now be invoked, so bump the count */
 	ao2_ref(client_state, +1);
-
-	if (!client_state->transport_reuse) {
-		ast_log(LOG_DEBUG, "Attempting to manually create transport\n");
-
-		pjsip_host_info dest_info;
-		status = pjsip_process_route_set(tdata, &dest_info);
-
-		if (status != PJ_SUCCESS)
-			return status;
-
-		struct stateless_send_resolver_callback_data* data = ast_malloc(sizeof(struct stateless_send_resolver_callback_data));
-		data->client_state = client_state;
-		data->tdata = tdata;
-
-		pj_strdup(tdata->pool, &tdata->dest_info.name, &dest_info.addr.host);
-		pjsip_endpt_resolve( ast_sip_get_pjsip_endpoint(), tdata->pool, &dest_info, data,
-					&stateless_send_resolver_callback);
-
-		return status;
-	}
-
-	ast_log(LOG_DEBUG, "Using transport factory to create transport\n");
-
 	/*
 	 * Set the transport in case transports were reloaded.
 	 * When pjproject removes the extraneous error messages produced,
@@ -672,6 +692,8 @@ static pj_status_t registration_client_send(struct sip_outbound_registration_cli
 	 */
 	ast_sip_set_tpselector_from_transport_name(client_state->transport_name, &selector);
 	pjsip_regc_set_transport(client_state->client, &selector);
+
+	ast_log(LOG_DEBUG, "Registration using factory-chosen transport\n");
 	status = pjsip_regc_send(client_state->client, tdata);
 
 	/* If the attempt to send the message failed and the callback was not invoked we need to
@@ -680,8 +702,19 @@ static pj_status_t registration_client_send(struct sip_outbound_registration_cli
 	if ((status != PJ_SUCCESS) && !(*callback_invoked)) {
 		ao2_ref(client_state, -1);
 	}
-	return status;
 
+	return status;
+}
+
+/*! \brief Helper function which sends a message and cleans up, if needed, on failure */
+static pj_status_t registration_client_send(struct sip_outbound_registration_client_state *client_state,
+	pjsip_tx_data *tdata)
+{
+	if (!client_state->transport_reuse) {
+		return registration_client_send_manual(client_state, tdata);
+	} else {
+		return registration_client_send_normal(client_state, tdata);
+	}
 }
 
 /*! \brief Helper function to add string to Supported header */
