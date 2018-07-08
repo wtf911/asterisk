@@ -3194,4 +3194,13 @@ void ast_sip_transport_state_register(struct ast_sip_tpmgr_state_callback *eleme
  */
 void ast_sip_transport_state_unregister(struct ast_sip_tpmgr_state_callback *element);
 
+/*!
+ * \brief Register an override to the default selection of transports based on endpoint name
+ * \since gvsip
+ *
+ * \param callback Callback to evoke when determining the transport when creating a new dialog
+ */
+typedef int (*transport_from_endpoint_callback)(const struct ast_sip_endpoint *endpoint, pjsip_transport** transport);
+void ast_sip_set_transport_from_endpoint_override(transport_from_endpoint_callback callback);
+
 #endif /* _RES_PJSIP_H */

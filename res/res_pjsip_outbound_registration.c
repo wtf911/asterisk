@@ -152,7 +152,11 @@
 						<literal>pjsip.conf</literal>. As with other <literal>res_pjsip</literal> modules, this will use the first available transport of the appropriate type if unconfigured.</para></note>
 					</description>
 				</configOption>
+				<configOption name="transport_reuse" default="yes">
+					<synopsis>Determine if same transport can be re-used by different registrations</synopsis>
+				</configOption>
 				<configOption name="line">
+
 					<synopsis>Whether to add a 'line' parameter to the Contact for inbound call matching</synopsis>
 					<description><para>
 						When enabled this option will cause a 'line' parameter to be added to the Contact
@@ -235,8 +239,10 @@
 	</manager>
  ***/
 
+/* forward declarations */
 static int set_outbound_initial_authentication_credentials(pjsip_regc *regc,
-		const struct ast_sip_auth_vector *auth_vector); /* forward decl */
+		const struct ast_sip_auth_vector *auth_vector);
+static int transport_from_endpoint_override(const struct ast_sip_endpoint *endpoint, pjsip_transport** transport);
 
 /*! \brief Some thread local storage used to determine if the running thread invoked the callback */
 AST_THREADSTORAGE(register_callback_invoked);
@@ -334,6 +340,8 @@ struct sip_outbound_registration {
 	unsigned int support_path;
 	/*! \brief Whether Outbound support is enabled */
 	unsigned int support_outbound;
+	/*! \brief Determine if same transport can be re-used by different registrations */
+	unsigned int transport_reuse;
 };
 
 /* \brief Vector type to store service routes */
@@ -386,14 +394,16 @@ struct sip_outbound_registration_client_state {
 	struct service_route_vector_type service_route_vector;
 	/*! \brief P-Associated-URI from register response */
 	pj_str_t associated_uri;
-	/*! \brief dest_info from original registration request */
-	pjsip_dest_info orig_dest_info;
 	/*! \brief Registration should be destroyed after completion of transaction */
 	unsigned int destroy:1;
 	/*! \brief Non-zero if we have attempted sending a REGISTER with authentication */
 	unsigned int auth_attempted:1;
 	/*! \brief The name of the transport to be used for the registration */
 	char *transport_name;
+	/*! \brief The transport used by the registration */
+	pjsip_transport *transport;
+	/*! \brief Determine if same transport can be re-used by different registrations */
+	unsigned int transport_reuse;
 	/*! \brief The name of the registration sorcery object */
 	char *registration_name;
 };
@@ -557,6 +567,64 @@ static void cancel_registration(struct sip_outbound_registration_client_state *c
 static pj_str_t PATH_NAME = { "path", 4 };
 static pj_str_t OUTBOUND_NAME = { "outbound", 8 };
 
+struct stateless_send_resolver_callback_data
+{
+	struct sip_outbound_registration_client_state *client_state;
+	pjsip_tx_data *tdata;
+};
+
+/*! \brief Callback used to manually select transport when transport_reuse is off */
+static void
+stateless_send_resolver_callback( pj_status_t status, void *token, const struct pjsip_server_addresses *addr)
+{
+	struct stateless_send_resolver_callback_data *data = (struct stateless_send_resolver_callback_data*) token;
+	struct sip_outbound_registration_client_state *client_state = data->client_state;
+	pjsip_tx_data *tdata = data->tdata;
+
+	pjsip_tpselector orig_selector = { .type = PJSIP_TPSELECTOR_NONE, };
+	ast_sip_set_tpselector_from_transport_name(client_state->transport_name, &orig_selector);
+
+	if (orig_selector.type != PJSIP_TPSELECTOR_LISTENER)
+	{
+		ast_log(LOG_ERROR, "Error: transport_reuse requires setting a transport\n");
+		status = PJ_EUNKNOWN;
+		return;
+	}
+
+	/* Copy server addresses */
+	if (addr && addr != &tdata->dest_info.addr) {
+		pj_memcpy( &tdata->dest_info.addr, addr, sizeof(pjsip_server_addresses));
+	}
+
+	if (orig_selector.u.listener->create_transport2) {
+		orig_selector.u.listener->create_transport2(orig_selector.u.listener,
+			pjsip_endpt_get_tpmgr(ast_sip_get_pjsip_endpoint()),
+			ast_sip_get_pjsip_endpoint(),
+			&tdata->dest_info.addr.entry[tdata->dest_info.cur_addr].addr,
+			tdata->dest_info.addr.entry[tdata->dest_info.cur_addr].addr_len,
+			tdata,
+			&client_state->transport);
+	} else {
+		orig_selector.u.listener->create_transport(orig_selector.u.listener,
+			pjsip_endpt_get_tpmgr(ast_sip_get_pjsip_endpoint()),
+			ast_sip_get_pjsip_endpoint(),
+			&tdata->dest_info.addr.entry[tdata->dest_info.cur_addr].addr,
+			tdata->dest_info.addr.entry[tdata->dest_info.cur_addr].addr_len,
+			&client_state->transport);
+	}
+
+	pjsip_tpselector new_selector = { .type = PJSIP_TPSELECTOR_TRANSPORT, };
+	new_selector.u.transport = client_state->transport;
+
+	ast_log(LOG_DEBUG, "Registration using specific transport %p\n", (void*)client_state->transport);
+
+	pjsip_regc_set_transport(client_state->client, &new_selector);
+	status = pjsip_regc_send(client_state->client, tdata);
+
+	ast_free(data);
+}
+
+
 /*! \brief Helper function which sends a message and cleans up, if needed, on failure */
 static pj_status_t registration_client_send(struct sip_outbound_registration_client_state *client_state,
 	pjsip_tx_data *tdata)
@@ -574,6 +642,29 @@ static pj_status_t registration_client_send(struct sip_outbound_registration_cli
 
 	/* Due to the message going out the callback may now be invoked, so bump the count */
 	ao2_ref(client_state, +1);
+
+	if (!client_state->transport_reuse) {
+		ast_log(LOG_DEBUG, "Attempting to manually create transport\n");
+
+		pjsip_host_info dest_info;
+		status = pjsip_process_route_set(tdata, &dest_info);
+
+		if (status != PJ_SUCCESS)
+			return status;
+
+		struct stateless_send_resolver_callback_data* data = ast_malloc(sizeof(struct stateless_send_resolver_callback_data));
+		data->client_state = client_state;
+		data->tdata = tdata;
+
+		pj_strdup(tdata->pool, &tdata->dest_info.name, &dest_info.addr.host);
+		pjsip_endpt_resolve( ast_sip_get_pjsip_endpoint(), tdata->pool, &dest_info, data,
+					&stateless_send_resolver_callback);
+
+		return status;
+	}
+
+	ast_log(LOG_DEBUG, "Using transport factory to create transport\n");
+
 	/*
 	 * Set the transport in case transports were reloaded.
 	 * When pjproject removes the extraneous error messages produced,
@@ -589,8 +680,8 @@ static pj_status_t registration_client_send(struct sip_outbound_registration_cli
 	if ((status != PJ_SUCCESS) && !(*callback_invoked)) {
 		ao2_ref(client_state, -1);
 	}
-
 	return status;
+
 }
 
 /*! \brief Helper function to add string to Supported header */
@@ -979,9 +1070,6 @@ static void save_response_fields_to_client_state(struct registration_response *r
 		pj_strdup_with_null(reg_pool, &response->client_state->associated_uri, &value);
 		ast_log(LOG_DEBUG, "Stored associated uri length %ld: %s\n", response->client_state->associated_uri.slen, response->client_state->associated_uri.ptr);
 	}
-
-	pj_memcpy(&response->client_state->orig_dest_info, &response->old_request->dest_info,
-		sizeof(pjsip_dest_info));
 }
 
 
@@ -1612,6 +1700,10 @@ static int sip_outbound_registration_regc_alloc(void *data)
 		pjsip_regc_update_contact(state->client_state->client, 1, &contact_uri, params);
 	}
 
+	if (!registration->transport_reuse) {
+		ast_sip_set_transport_from_endpoint_override(&transport_from_endpoint_override);
+	}
+
 	return 0;
 }
 
@@ -1640,6 +1732,7 @@ static int sip_outbound_registration_perform(void *data)
 	state->client_state->retries = 0;
 	state->client_state->support_path = registration->support_path;
 	state->client_state->support_outbound = registration->support_outbound;
+	state->client_state->transport_reuse = registration->transport_reuse;
 	state->client_state->auth_rejection_permanent = registration->auth_rejection_permanent;
 
 	pjsip_regc_update_expires(state->client_state->client, registration->expiration);
@@ -2380,6 +2473,33 @@ static int find_registration(void *obj, void *arg, int flags)
 	return !strcmp(target_name, registration_name) ? CMP_MATCH : 0;
 }
 
+static int transport_from_endpoint_override(const struct ast_sip_endpoint *endpoint, pjsip_transport** transport)
+{
+	if (!endpoint || ast_strlen_zero(endpoint->outbound_registration)) {
+		ast_log(LOG_DEBUG, "Outgoing request not associated with a registration. No mangling necessary.\n");
+		return 0;
+	}
+
+	RAII_VAR(struct ao2_container *, states, NULL, ao2_cleanup);
+	states = ao2_global_obj_ref(current_states);
+	if (!states) {
+		ast_log(LOG_ERROR, "Cannot find outbound registration states\n");
+		return 0;
+	}
+
+	RAII_VAR(struct sip_outbound_registration_state *, state, NULL, ao2_cleanup);
+	state = ao2_callback(states, 0, find_registration, (void*)endpoint->outbound_registration);
+	if (!state) {
+		ast_log(LOG_ERROR, "Cannot find matching outbound registration state: %s\n", endpoint->outbound_registration);
+		return 0;
+	}
+
+	ast_log(LOG_DEBUG, "Setting transport to %p\n", (void*)state->client_state->transport);
+	*transport = state->client_state->transport;
+
+	return 1;
+}
+
 /*! \brief Mangle outgoing INVITEs by adding headers based on the response to the associated registration request */
 static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_data *tdata)
 {
@@ -2432,16 +2552,6 @@ static void handle_outgoing_request(struct ast_sip_session *session, pjsip_tx_da
 	// add outbound & path to supported header
 	add_to_supported_header(tdata, &PATH_NAME);
 	add_to_supported_header(tdata, &OUTBOUND_NAME);
-
-	// copy registration's resolved host ip to invite
-	pj_memcpy(&tdata->dest_info, &state->client_state->orig_dest_info, sizeof(pjsip_dest_info));
-
-	if (tdata->dest_info.addr.count > 0) {
-		static const int ADDR_SIZE_MAX = 20;
-		char tmp_addr[ADDR_SIZE_MAX];
-		pj_sockaddr_print(&tdata->dest_info.addr.entry[0].addr, tmp_addr, ADDR_SIZE_MAX, 3);
-		ast_log(LOG_DEBUG, "Re-using outbound registration address of %s\n", tmp_addr);
-	}
 }
 
 
@@ -2550,6 +2660,7 @@ static int load_module(void)
 	ast_sorcery_object_field_register_custom(ast_sip_get_sorcery(), "registration", "outbound_auth", "", outbound_auth_handler, outbound_auths_to_str, outbound_auths_to_var_list, 0, 0);
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_path", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_path));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "support_outbound", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, support_outbound));
+	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "transport_reuse", "yes", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, transport_reuse));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "line", "no", OPT_BOOL_T, 1, FLDSET(struct sip_outbound_registration, line));
 	ast_sorcery_object_field_register(ast_sip_get_sorcery(), "registration", "endpoint", "", OPT_STRINGFIELD_T, 0, STRFLDSET(struct sip_outbound_registration, endpoint));
 

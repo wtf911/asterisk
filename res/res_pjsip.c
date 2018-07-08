@@ -3418,10 +3418,28 @@ int ast_sip_set_tpselector_from_transport_name(const char *transport_name, pjsip
 	return ast_sip_set_tpselector_from_transport(transport, selector);
 }
 
+static transport_from_endpoint_callback transport_from_endpoint_override_callback;
+
+void ast_sip_set_transport_from_endpoint_override(transport_from_endpoint_callback callback)
+{
+	ast_log(LOG_DEBUG, "Transport override set!\n");
+	transport_from_endpoint_override_callback = callback;
+}
+
+
 int ast_sip_set_tpselector_from_ep_or_uri(const struct ast_sip_endpoint *endpoint,
 	pjsip_sip_uri *sip_uri, pjsip_tpselector *selector)
 {
 	char transport_name[128];
+
+	pjsip_transport* transport;
+	if (transport_from_endpoint_override_callback && transport_from_endpoint_override_callback(endpoint, &transport)) {
+		ast_log(LOG_DEBUG, "Overriding endpoint transport to use %p\n", (void*)transport);
+
+		selector->type = PJSIP_TPSELECTOR_TRANSPORT;
+		selector->u.transport = transport;
+		return 1;
+	}
 
 	if (ast_sip_get_transport_name(endpoint, sip_uri, transport_name, sizeof(transport_name))) {
 		return 0;
