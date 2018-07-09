@@ -348,7 +348,7 @@ static char *handle_pjsip_show_version(struct ast_cli_entry *e, int cmd, struct 
 		return NULL;
 	}
 
-	ast_cli(a->fd, "PJPROJECT version currently running against: %s\n", pj_get_version());
+	ast_cli(a->fd, "PJPROJECT version currently running against: %s w/gvsip\n", pj_get_version());
 
 	return CLI_SUCCESS;
 }
