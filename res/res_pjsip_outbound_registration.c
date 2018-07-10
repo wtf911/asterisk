@@ -644,7 +644,7 @@ static pj_status_t registration_client_send_manual(struct sip_outbound_registrat
 	ao2_ref(client_state, +1);
 
 	/* If we already have a transport, just use it. */
-	if (client_state->transport) {
+	if (client_state->transport && !client_state->transport->is_shutdown) {
 		ast_log(LOG_DEBUG, "Registration re-using transport %p\n", (void*)client_state->transport);
 		return send_on_transport(client_state, tdata);
 	}
