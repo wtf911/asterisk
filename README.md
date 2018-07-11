@@ -128,6 +128,7 @@ stunaddr=stun.l.google.com:19302
 ### extensions.conf
 ```
 [from-internal]
+exten => _+1NXXNXXXXXX,1,Goto(${EXTEN:2},1)
 exten => _NXXNXXXXXX,1,Set(CALLERID(dnid)=1${CALLERID(dnid)})
 exten => _NXXNXXXXXX,n,Goto(1${EXTEN},1)
 exten => _1NXXNXXXXXX,1,Dial(PJSIP/${EXTEN}@gvsip1)
